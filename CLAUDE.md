@@ -17,22 +17,25 @@ lock file, logging, type hints, LICENSE, data provenance, year-proof holidays).
 
 ## Status and next action
 
-- **Phase 0 (scaffold) is done** — layout, MIT LICENSE, universal lock files, CI
-  (ruff + mypy + pytest + both Docker builds), logging/typing conventions,
-  `tests/synthetic.py` (NYISO-shaped synthetic archive with truth frames),
-  `data/README.md`. Suite: 19 offline tests, all green; both Docker images build.
-- **Next action: Phase 1** — `app/nyiso.py`: `fetch_day` / `fetch_month` with retry and
-  cache under `NYISO_CACHE_DIR` (mirror archive paths), zip extraction, and
-  `normalize_pal` / `normalize_prices` / `normalize_isolf` → canonical UTC frames
-  (`ts_utc, zone, load_mw` / `ts_utc, zone, p_da, p_rt` / `issued_date, ts_utc, zone,
-  isolf_mw`). Test each against `SyntheticNYISO` truth frames (fall-back week fixture
-  `synth_autumn`, spring fixture `synth_spring`), then one `-m live` test on a real
-  recent day. Resolve the ⚠️ items in `data/README.md` (zip layout, isolf/rtlbmp
-  fall-back hour, isolf posting time vs 05:00 ET) with real downloads.
-- GitHub: the user creates a **private** `chenyufang-data/gridcast` (public later, when
-  the README has backtest results and the site is live). When it exists:
-  `git remote add origin https://github.com/chenyufang-data/gridcast && git push -u origin main`.
-  Check `git remote -v` first — no remote was set as of Phase 0.
+- **Phase 0 (scaffold) and Phase 1 (NYISO data layer) are done.** Phase 0: layout,
+  MIT LICENSE, universal lock files, CI (ruff + mypy + pytest + both Docker builds),
+  logging/typing conventions, `tests/synthetic.py` (NYISO-shaped synthetic archive
+  with truth frames), `data/README.md`. Phase 1: `app/nyiso.py` — `ArchiveClient`
+  (daily files / final month zips / refreshed partial current-month zip, cache under
+  `NYISO_CACHE_DIR`, injectable `fetch` and `today`), normalizers to canonical UTC
+  frames, `resample_slots` (time-weighted 15-min grid with `coverage`), `add_nyca`;
+  `tests/test_nyiso.py` (20 offline cases against the synthetic truth frames + one
+  `-m live` round trip, which passed against the real archive on 2026-09-17).
+- **Next action: Phase 2** — model port (`model.py`) with the cutoff timestamp
+  (D−1 05:00 ET), DST-aware slot grid from `resample_slots`, `holidays` lib,
+  features per `docs/plan.md` §3; `src/backtest.py` + `scripts/run_backtest.py`
+  (per-zone, parallel, per-day cache under `results/`); baselines incl. **two isolf
+  benchmarks** (D−1-named file = pre-close, D-named file = post-close, see
+  `data/README.md`); α estimation; `imbalance_report.py`; calibration/conformal;
+  experiment log. Backfill 2025-06-01 → today first via `ArchiveClient.frame`
+  (monthly zips; ~15 months × 5 types).
+- GitHub: `origin` = https://github.com/chenyufang-data/gridcast (private), `main`
+  pushed and tracking. CI status must be checked on the web (no `gh`).
 - Folder swap is done: this repo is `Documents/gridcast`, the source is
   `Documents/gridcast-shanxi`.
 
@@ -64,10 +67,16 @@ lock file, logging, type hints, LICENSE, data provenance, year-proof holidays).
   2026-09-15, not 288) → dedupe on (ts, tz, zone) then resample; never index by
   position. Quoting differs per type (`damlbmp` unquoted, the rest quoted strings).
 - Price files: no tz column, 15 names (11 zones + `H Q`, `NPX`, `O H`, `PJM`), DST
-  fall-back day lists `01:00` twice (first = EDT). `isolf` file of day X covers
-  X…X+5 hourly, integer MW, `NYISO` = sum of zones → benchmark for D is the D−1 file's
-  day-D rows (⚠️ posting time vs 05:00 ET still unverified). DAM bids due 05:00 ET
-  on D−1 (FERC intro guide; NYISO Manual 11).
+  fall-back day lists `01:00` twice in every hourly file (first = EDT; `isolf` repeats
+  an identical row). `isolf` file named for day X covers X…X+5 hourly, integer MW,
+  `NYISO` = sum of zones, and is **posted on X−1 between ~07:10 and ~08:00 ET, after
+  the 05:00 ET DAM close** (absent at 05:03 ET). Leakage-free ISO benchmark for D =
+  the file named D−1 (day-D rows); the D-named file is the post-close reference.
+  `damlbmp` for D also appears on D−1 after the close. DAM bids due 05:00 ET on D−1
+  (FERC intro guide; NYISO Manual 11).
+- Daily files live ~11 days; monthly zips are flat daily files, final on the 1st of the
+  next month, and the current month's zip is rebuilt ~05:00 ET daily including today's
+  partial day. `ArchiveClient` encodes all of this.
 - Legal notice grants no license and is silent on CSVs → the fetch-not-redistribute plan.
 
 ## Port-size estimate (what is new vs reused from gridcast-shanxi, ~5,100 LOC)

@@ -48,21 +48,43 @@ Gotchas that every normalizer must handle (each has a unit test):
   Spring-forward (2026-03-08): 23 hours, no `02:xx`. Store UTC internally.
 - **Two stamping conventions.** `pal` stamps the interval start; `realtime_zone`
   stamps the interval end.
-- Daily files exist only for recent dates (older dates return 404); backfill comes
-  from the monthly zips, which go back to 2005.
-- ⚠️ Still unverified: the internal layout of the monthly zips, how `isolf` and
-  `rtlbmp` list the fall-back hour, and whether the D−1 `isolf` file is posted before
-  the 05:00 ET bid cutoff.
+- **Daily files live about 11 days** (on 2026-09-17: 09-06 → 200, 09-04 → 404). The
+  monthly zip is the durable source: flat daily files inside (`20251102isolf.csv`, …),
+  final on the 1st of the next month (~00:15 ET), and for the **current month rebuilt
+  every morning (~05:00 ET) with every day so far, including today's partial day**.
+- **Fall-back hour in the hourly files** (2025-11-02, from the November zips):
+  `damlbmp` and `rtlbmp` list `01:00` twice with different values (EDT first);
+  `isolf` lists `01:00` twice with **identical** values (145 rows that day).
+- **`isolf` posting time**: the file named for day D (covering D…D+5) is last modified
+  on D−1 between ~07:10 and ~08:00 ET, and does not exist at 05:00 ET on D−1
+  (checked 2026-09-17 05:03 ET: `20260918isolf.csv` → 404). So NYISO's forecast for D
+  in the D-named file was **not available before the DAM close**; the leakage-free ISO
+  benchmark for day D is the file named D−1 (its day-D rows, a 2-day-ahead forecast),
+  and the D-named file is the stronger post-close reference. Both must be reported.
+- `damlbmp` for day D is published on D−1 after the DAM clears (not present at
+  05:03 ET on D−1); DA prices for D are therefore unknown at the bid cutoff.
+- Line endings vary (`isolf` LF, price files CRLF inside the zips); parsers must not care.
 
-## Local layout (created at runtime, Phase 1)
+## Local layout (created at runtime by `app/nyiso.py`)
 
 ```
 data/
   README.md          this file (the only committed item)
-  cache/<dir>/…      raw daily CSVs and monthly zips, mirroring the archive paths
+  cache/<dir>/…      raw daily CSVs and monthly zips, mirroring the archive paths;
+                     `<zip>.partial` = the current month's zip (refreshed when a
+                     requested day is missing); days >= today are never cached
   app.db             SQLite (APP_DB_PATH)
   weather.csv        Open-Meteo cache (WEATHER_PATH)
 ```
+
+Canonical frames produced by the normalizers (all timestamps tz-aware UTC):
+`normalize_pal` → `ts_utc` (interval start), `ts_end_utc`, `zone`, `load_mw`;
+`normalize_realtime` → the same with `p_rt` (the file stamps interval ends; the start
+is the previous stamp, capped at 5 min); `normalize_damlbmp` / `normalize_rtlbmp` →
+hourly `p_da` / `p_rt_hourly`; `normalize_isolf` → `issued`, `ts_utc`, `zone`,
+`isolf_mw` including `NYCA`. `resample_slots` turns interval observations into a
+time-weighted 15-min grid with a `coverage` column, and `add_nyca` appends the
+statewide total where all 11 zones are present.
 
 Tests never touch this directory: they use the deterministic synthetic archive in
 `tests/synthetic.py`, which reproduces the layouts and gotchas above.
