@@ -1,0 +1,31 @@
+# environments and secrets
+.venv/
+.env
+githubtoken.txt
+
+# python
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# NYISO bytes are never committed: fetch-not-redistribute (see data/README.md)
+data/cache/
+data/*.csv
+data/*.zip
+
+# runtime state
+*.db
+*.db-wal
+*.db-shm
+
+# regeneratable backtest outputs
+results/
+*.png
+
+# editors / tooling
+*.un~
+*~
+.claude/

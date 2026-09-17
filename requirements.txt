@@ -1,0 +1,12 @@
+# Backend service (what Dockerfile installs). Loose specs live here; exact
+# versions are pinned in requirements.lock (regenerate: see CONTRIBUTING.md).
+pandas>=2.2
+numpy>=1.26
+scikit-learn>=1.4
+lightgbm>=4.3
+fastapi>=0.110
+uvicorn[standard]>=0.29
+python-multipart>=0.0.9
+requests>=2.31          # app/nyiso.py archive fetch, app/weather.py Open-Meteo
+holidays>=0.50          # US federal + NY holidays (model features, repair exemptions)
+tzdata>=2024.1          # IANA zone database for zoneinfo on Windows images

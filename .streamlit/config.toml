@@ -1,0 +1,5 @@
+# Forced light theme: chat bubbles and the plot palette are designed for a
+# light background; without this, browsers in dark mode get night mode.
+[theme]
+base = "light"
+primaryColor = "#2563eb"

@@ -1,6 +1,7 @@
 # gridcast — Build Plan (NYISO day-ahead load forecasting)
 
-> Status: **draft for approval — no code written yet.** Prepared 2026-09-17.
+> Status: **approved 2026-09-17** (answers to §10 recorded in CLAUDE.md); Phase 0 scaffold
+> done the same day. Facts verified after approval live in `data/README.md`.
 > Source of the architecture: github.com/chenyufang-data/gridcast-shanxi (Shanxi-market
 > original). Every NYISO fact below marked ✅ was verified against the live archive on
 > 2026-09-17; ⚠️ marks facts still to confirm.

@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements*.lock
+      # pinned, universal lock (Windows dev / Linux CI / Docker share it)
+      - run: pip install -r requirements-dev.lock
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: mypy
+      # offline suite only: `live` (network) tests are excluded by pytest.ini
+      - run: pytest
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t gridcast-backend .
+      - run: docker build -f Dockerfile.frontend -t gridcast-frontend .

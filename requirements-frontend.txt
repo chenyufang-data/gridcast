@@ -1,0 +1,6 @@
+# Streamlit frontend (pure HTTP client of the backend API)
+streamlit>=1.36
+plotly>=5.18
+requests>=2.31
+pandas>=2.2
+python-dotenv>=1.0      # loads GITHUB_TOKEN / API_BASE from .env locally

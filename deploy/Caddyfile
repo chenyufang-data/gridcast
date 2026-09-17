@@ -1,0 +1,12 @@
+# Reverse proxy for the public demo. SITE_ADDRESS is injected from the
+# environment by docker-compose.prod.yml.
+#
+# Only the Streamlit frontend is exposed; the FastAPI backend stays on the
+# internal network (reach it via SSH tunnel to 127.0.0.1:8000 when needed).
+# Streamlit websockets pass through reverse_proxy automatically.
+# Access model: public read, no basic auth; writes are gated in-app by
+# X-Admin-Token and a per-IP rate limit (docs/plan.md §5).
+
+{$SITE_ADDRESS} {
+	reverse_proxy frontend:8501
+}

@@ -1,0 +1,50 @@
+# Tool configuration only (no packaging): the repo is run in place, like the source.
+# Dependencies: requirements*.txt (loose) + requirements*.lock (pinned).
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["notebooks", "data"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",   # pycodestyle
+    "F",        # pyflakes
+    "I",        # isort
+    "B",        # bugbear
+    "UP",       # pyupgrade (py311 syntax: X | None, list[str], ...)
+    "SIM",      # simplify
+    "T20",      # no print() in library code: use logging (scripts/ are exempt below)
+    "LOG",      # logging usage
+    "DTZ",      # naive datetimes are bugs in a DST-aware pipeline
+]
+ignore = [
+    "SIM108",   # ternary-vs-if is a readability call, not a rule
+]
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/*" = ["T20"]      # CLI scripts print their report
+"tests/*" = ["T20", "DTZ"] # test helpers may print and build naive fixtures deliberately
+"frontend/*" = ["T20"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app", "src", "frontend", "model"]
+
+[tool.mypy]
+files = ["app", "src", "frontend", "tests"]  # + "scripts" once Phase 2 adds them
+check_untyped_defs = true
+no_implicit_optional = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_return_any = false
+disallow_untyped_defs = false      # public functions are annotated by convention (CONTRIBUTING.md);
+                                   # enforce per-module with `# mypy: disallow-untyped-defs` when ported
+show_error_codes = true
+pretty = true
+
+[[tool.mypy.overrides]]
+module = [
+    "pandas.*", "lightgbm.*", "sklearn.*", "streamlit.*", "plotly.*",
+    "holidays.*", "matplotlib.*", "requests.*", "dotenv.*",
+]
+ignore_missing_imports = true

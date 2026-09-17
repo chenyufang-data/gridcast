@@ -1,0 +1,50 @@
+# Production stack for the public demo (GCE VM or any Docker host):
+#   docker compose -f docker-compose.prod.yml up -d --build
+# Caddy terminates HTTPS; only ports 80/443 are public. Reads are public,
+# writes need X-Admin-Token. See deploy/RUNBOOK.md (Phase 5).
+
+services:
+  backend:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8000:8000"   # host-only: seeding + SSH-tunnel debugging
+    environment:
+      ADMIN_TOKEN: ${ADMIN_TOKEN:?set ADMIN_TOKEN in .env}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - app_data:/data
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    restart: unless-stopped
+    environment:
+      API_BASE: http://backend:8000
+      ADMIN_TOKEN: ${ADMIN_TOKEN}
+      # free-tier LLM routing; safe to expose (daily cap, graceful 429)
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+    depends_on:
+      - backend
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      # ":80" for plain HTTP on the bare IP; a real domain enables auto-HTTPS
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data      # keep: Let's Encrypt certificates (rate limits!)
+      - caddy_config:/config
+    depends_on:
+      - frontend
+
+volumes:
+  app_data:
+  caddy_data:
+  caddy_config:

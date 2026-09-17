@@ -1,0 +1,31 @@
+# Local development stack:  docker compose up --build
+# Host ports 8010/8510 (8000/8501 are taken by another local stack); inside
+# the compose network the services keep their native ports.
+services:
+  backend:
+    build: .
+    ports:
+      - "8010:8000"
+    environment:
+      # required on every write endpoint (POST/PATCH/DELETE); read from .env
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-dev-token}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - app_data:/data
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    ports:
+      - "8510:8501"
+    environment:
+      API_BASE: http://backend:8000
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-dev-token}
+      # free-tier LLM for the chat panel (GitHub Models); unset = chips + keywords only
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+    depends_on:
+      - backend
+
+volumes:
+  app_data:

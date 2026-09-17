@@ -1,0 +1,15 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY requirements-frontend.lock .
+RUN pip install --no-cache-dir -r requirements-frontend.lock
+
+COPY frontend/ frontend/
+COPY .streamlit/ .streamlit/
+
+# Backend URL is injected by docker-compose (http://backend:8000)
+ENV API_BASE=http://127.0.0.1:8000
+
+EXPOSE 8501
+CMD ["streamlit", "run", "frontend/app.py", "--server.address", "0.0.0.0", "--server.port", "8501", "--server.headless", "true"]
