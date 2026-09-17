@@ -1,0 +1,6 @@
+# Normalize line endings: LF in the repo and working copy (Docker, Caddy, CI files
+# must stay LF; Windows editors handle LF fine). Lock files are generated: no diffs.
+* text=auto eol=lf
+*.lock linguist-generated=true
+*.png binary
+*.zip binary
