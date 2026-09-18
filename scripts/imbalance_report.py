@@ -100,6 +100,14 @@ def build_strategies(results: pd.DataFrame, baselines: pd.DataFrame) -> pd.DataF
     return df
 
 
+def bootstrap_ci(daily_totals: pd.Series, n: int = 2000, seed: int = 0) -> tuple[float, float]:
+    """95% interval of the pooled total from resampling days with replacement."""
+    rng = np.random.default_rng(seed)
+    vals = daily_totals.to_numpy(dtype=float)
+    sums = rng.choice(vals, size=(n, len(vals)), replace=True).sum(axis=1)
+    return float(np.quantile(sums, 0.025)), float(np.quantile(sums, 0.975))
+
+
 def report(df: pd.DataFrame, prices: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     actual = df[["ts_utc", "zone", "actual"]].rename(columns={"actual": "load_mw"})
     by_zone, pooled = [], []
@@ -110,6 +118,9 @@ def report(df: pd.DataFrame, prices: pd.DataFrame) -> tuple[pd.DataFrame, pd.Dat
         by_zone.append(z)
         p = summarize(s)
         p.insert(0, "strategy", name)
+        daily = s.assign(day=s["ts_utc"].dt.tz_convert("America/New_York").dt.date)
+        lo, hi = bootstrap_ci(daily.groupby("day")["imbalance_usd"].sum())
+        p["ci95_low"], p["ci95_high"] = lo, hi
         pooled.append(p)
     return pd.concat(by_zone, ignore_index=True), pd.concat(pooled, ignore_index=True)
 
@@ -145,19 +156,19 @@ def main(argv: list[str] | None = None) -> int:
         f"imbalance cost vs perfect foresight, {df['date'].min().date()} .. {df['date'].max().date()} ({days} days, {df['zone'].nunique()} zones), hourly bids settled per 15-min slot\n"
     )
     view = pooled.set_index("strategy")[
-        ["imbalance_usd", "usd_per_mwh", "pct_of_da_cost", "abs_imbalance_usd"]
+        [
+            "imbalance_usd",
+            "ci95_low",
+            "ci95_high",
+            "usd_per_mwh",
+            "pct_of_da_cost",
+            "abs_imbalance_usd",
+        ]
     ]
     view["usd_per_day"] = view["imbalance_usd"] / days
+    print(view.round(0).astype({"usd_per_mwh": float, "pct_of_da_cost": float}).to_string())
     print(
-        view.round(
-            {
-                "imbalance_usd": 0,
-                "usd_per_mwh": 3,
-                "pct_of_da_cost": 3,
-                "abs_imbalance_usd": 0,
-                "usd_per_day": 0,
-            }
-        ).to_string()
+        "\nci95 = bootstrap over days (2000 resamples); overlapping intervals are not distinguishable"
     )
     alpha = df.groupby("zone")["alpha"].agg(["mean", "min", "max"]).round(3)
     print("\nα per zone (newsvendor ratio of the trailing 30-day spread, as of each cutoff):")

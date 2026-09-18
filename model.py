@@ -42,6 +42,7 @@ RECENT_LAGS = ["lag_2d", "lag_3d"]
 WEEK_LAGS = ["lag_7d", "lag_14d", "lag_21d"]
 ALL_LAGS = [f"lag_{k}d" for k in LAGS]
 WEATHER_FEATURES = ["temp_mean", "temp_min", "temp_max", "temp_dev"]
+WEATHER_HOURLY_FEATURES = ["temp_h"]
 AGE_COL = "_age_days"  # days before the newest training day; only for decay weights
 FEATURE_VERSION = "nyiso-fv1"  # bump when features or hyper-parameters change
 
@@ -174,6 +175,7 @@ def build_features(
     train_dates: list[pd.Timestamp],
     predict_target: date | None,
     weather: pd.DataFrame | None = None,
+    weather_hourly: pd.DataFrame | None = None,
 ) -> tuple[pd.DataFrame, list[str]]:
     """Feature rows for every slot of the training days and of the prediction day.
 
@@ -236,6 +238,11 @@ def build_features(
         w = weather[["date", *WEATHER_FEATURES]].drop_duplicates("date")
         rows = rows.merge(w, on="date", how="left")
         weather_cols = list(WEATHER_FEATURES)
+    if weather_hourly is not None and not weather_hourly.empty:
+        rows["hour_utc"] = rows["ts_utc"].dt.floor("h")
+        wh = weather_hourly[["hour_utc", *WEATHER_HOURLY_FEATURES]].drop_duplicates("hour_utc")
+        rows = rows.merge(wh, on="hour_utc", how="left").drop(columns="hour_utc")
+        weather_cols += list(WEATHER_HOURLY_FEATURES)
 
     rows = rows.replace([np.inf, -np.inf], np.nan)
     newest = max(train_dates) if train_dates else rows["date"].max()
@@ -332,6 +339,7 @@ def forecast_day(
     target: date,
     *,
     weather: pd.DataFrame | None = None,
+    weather_hourly: pd.DataFrame | None = None,
     quantiles: tuple[float, ...] = (0.1, 0.9),
     alpha: float | None = None,
     window_days: int = 56,
@@ -364,7 +372,7 @@ def forecast_day(
             f"only {len(targets)} training days before {target}; need {MIN_TRAIN_DAYS}"
         )
 
-    rows, cols = build_features(repaired, targets, target, weather)
+    rows, cols = build_features(repaired, targets, target, weather, weather_hourly)
     train = rows[rows["y"].notna() & rows["lag_7d"].notna()]
     pred_rows = (
         rows[rows["date"] == pd.Timestamp(target)].sort_values("slot").reset_index(drop=True)

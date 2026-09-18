@@ -77,6 +77,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--no-weather", action="store_true")
     parser.add_argument(
+        "--hourly-weather", action="store_true", help="add temp_h (forecast C at each hour)"
+    )
+    parser.add_argument("--n-estimators", type=int, default=600)
+    parser.add_argument("--learning-rate", type=float, default=0.02)
+    parser.add_argument(
         "--target-mode",
         choices=["mw", "ratio"],
         default="mw",
@@ -102,7 +107,9 @@ def main(argv: list[str] | None = None) -> int:
         alpha_window_days=args.alpha_window,
         weather_lead=None if args.no_weather else args.weather_lead,
         target_mode=args.target_mode,
+        hourly_weather=args.hourly_weather,
         workers=args.workers,
+        model_overrides={"n_estimators": args.n_estimators, "learning_rate": args.learning_rate},
     )
     data = dataset.load_all()
     prices = slot_prices(data["rt_slots"], data["da_hourly"])
@@ -114,15 +121,23 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
+    whourly = weather.load_weather_hourly() if args.hourly_weather else None
+    if args.hourly_weather and whourly is None:
+        print("data/weather_hourly.csv missing: run scripts/fetch_weather.py", file=sys.stderr)
+        return 2
+
     t0 = time.perf_counter()
-    results = run(cfg, data["load_slots"], prices, wdf)
+    results = run(cfg, data["load_slots"], prices, wdf, whourly)
     if results.empty:
         print("no results", file=sys.stderr)
         return 1
     summary = summarize(results)
     summary.to_csv(cfg.out_dir / "summary.csv", index=False)
     print(
-        f"\nbacktest '{cfg.name}': {cfg.start} .. {cfg.end}, window {cfg.window_days}d, half-life {cfg.half_life}d, weather {cfg.weather_lead or 'off'}, target {cfg.target_mode}"
+        f"\nbacktest {cfg.name!r}: {cfg.start} .. {cfg.end}, window {cfg.window_days}d, "
+        f"half-life {cfg.half_life}d, weather {cfg.weather_lead or 'off'}, target {cfg.target_mode}, "
+        f"hourly weather {cfg.hourly_weather}, trees {cfg.model_overrides.get('n_estimators')} "
+        f"@ lr {cfg.model_overrides.get('learning_rate')}"
     )
     print(
         f"protocol: retrain per zone and day on slots ending <= D-1 05:00 ET; {time.perf_counter() - t0:.0f}s wall\n"

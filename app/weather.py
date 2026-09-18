@@ -10,12 +10,13 @@ serves, for every hour, the value forecast ``N`` days earlier:
   i.e. after the cutoff for hours past 05:00 ET → kept only for a labelled,
   optimistic experiment (``lead="d1"``).
 
-Everything is best-effort and offline-safe: failures leave the existing CSV untouched
+Everything is best-effort and offline-safe: failures leave the existing CSVs untouched
 and the model degrades to its no-weather feature set. Data: Open-Meteo
 (https://open-meteo.com/, CC BY 4.0).
 
-CSV layout (``WEATHER_PATH``, default ``data/weather.csv``):
-``date, zone, tfc1_mean, tfc1_min, tfc1_max, tfc2_mean, tfc2_min, tfc2_max`` (°C).
+Files (``WEATHER_PATH`` / ``WEATHER_HOURLY_PATH``, default ``data/weather*.csv``):
+daily ``date, zone, tfc1_mean, tfc1_min, tfc1_max, tfc2_mean, tfc2_min, tfc2_max`` (°C,
+local ET days) and hourly ``ts_utc, zone, tfc1, tfc2``.
 """
 
 from __future__ import annotations
@@ -35,6 +36,9 @@ log = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 WEATHER_PATH = Path(os.environ.get("WEATHER_PATH") or PROJECT_ROOT / "data" / "weather.csv")
+WEATHER_HOURLY_PATH = Path(
+    os.environ.get("WEATHER_HOURLY_PATH") or PROJECT_ROOT / "data" / "weather_hourly.csv"
+)
 PREVIOUS_RUNS_URL = "https://previous-runs-api.open-meteo.com/v1/forecast"
 FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 
@@ -62,16 +66,26 @@ VARIABLES = {"tfc1": "temperature_2m_previous_day1", "tfc2": "temperature_2m_pre
 LEADS = {"d1": "tfc1", "d2": "tfc2"}
 
 
-def _daily(hourly: dict[str, list[object]], var: str, prefix: str) -> pd.DataFrame:
-    df = pd.DataFrame({"ts": pd.to_datetime(hourly["time"]), "t": hourly[var]}).dropna()
-    df["date"] = df["ts"].dt.normalize()
-    agg = df.groupby("date")["t"].agg(["mean", "min", "max"]).round(2)
-    agg.columns = [f"{prefix}_mean", f"{prefix}_min", f"{prefix}_max"]
-    return agg
+def _frames(hourly: dict[str, list[object]], zone: str) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """API payload (UTC stamps) -> (daily aggregates on local ET days, hourly UTC rows)."""
+    ts_utc = pd.to_datetime(hourly["time"]).tz_localize("UTC")
+    h = pd.DataFrame({"ts_utc": ts_utc, **{k: hourly[v] for k, v in VARIABLES.items()}})
+    h.insert(1, "zone", zone)
+    local_day = h["ts_utc"].dt.tz_convert(MARKET_TZ).dt.normalize().dt.tz_localize(None)
+    parts = []
+    for prefix in VARIABLES:
+        agg = h.groupby(local_day)[prefix].agg(["mean", "min", "max"]).round(2)
+        agg.columns = [f"{prefix}_mean", f"{prefix}_min", f"{prefix}_max"]
+        parts.append(agg)
+    daily = pd.concat(parts, axis=1).rename_axis("date").reset_index()
+    daily.insert(1, "zone", zone)
+    return daily, h.dropna(subset=list(VARIABLES), how="all").reset_index(drop=True)
 
 
-def fetch_zone(zone: str, start: date, end: date, timeout: float = 60.0) -> pd.DataFrame:
-    """Daily forecast temperatures for one zone: ``date, zone, tfc1_*, tfc2_*``."""
+def fetch_zone(
+    zone: str, start: date, end: date, timeout: float = 60.0
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """(daily, hourly) forecast temperatures for one zone over `start`..`end`."""
     lat, lon = ZONE_CENTROIDS[zone]
     params: dict[str, str | float] = {
         "latitude": lat,
@@ -79,53 +93,61 @@ def fetch_zone(zone: str, start: date, end: date, timeout: float = 60.0) -> pd.D
         "hourly": ",".join(VARIABLES.values()),
         "start_date": start.isoformat(),
         "end_date": end.isoformat(),
-        "timezone": str(MARKET_TZ),
+        "timezone": "UTC",
     }
     resp = requests.get(PREVIOUS_RUNS_URL, params=params, timeout=timeout)
     resp.raise_for_status()
-    hourly = resp.json()["hourly"]
-    parts = [_daily(hourly, var, prefix) for prefix, var in VARIABLES.items()]
-    out = pd.concat(parts, axis=1).reset_index()
-    out.insert(1, "zone", zone)
-    return out
+    return _frames(resp.json()["hourly"], zone)
 
 
-def with_nyca(df: pd.DataFrame) -> pd.DataFrame:
-    """Append the load-weighted statewide row per date."""
+def with_nyca(df: pd.DataFrame, key: str = "date") -> pd.DataFrame:
+    """Append the load-weighted statewide row per `key` (``date`` or ``ts_utc``)."""
     z = df[df["zone"] != NYCA].copy()
     z["w"] = z["zone"].map(ZONE_WEIGHT)
     cols = [c for c in z.columns if c.startswith("tfc")]
     weighted = z[cols].multiply(z["w"], axis=0)
-    weighted["date"] = z["date"]
+    weighted[key] = z[key]
     weighted["w"] = z["w"]
-    g = weighted.groupby("date").sum()
+    g = weighted.groupby(key).sum()
     total = g[cols].div(g["w"], axis=0).round(2).reset_index()
     total.insert(1, "zone", NYCA)
-    return (
-        pd.concat([z.drop(columns="w"), total], ignore_index=True)
-        .sort_values(["date", "zone"])
-        .reset_index(drop=True)
-    )
+    out = pd.concat([z.drop(columns="w"), total], ignore_index=True)
+    return out.sort_values([key, "zone"]).reset_index(drop=True)
 
 
 def refresh(
-    start: date, end: date | None = None, path: Path | None = None, pause: float = 0.3
+    start: date,
+    end: date | None = None,
+    path: Path | None = None,
+    hourly_path: Path | None = None,
+    pause: float = 0.3,
 ) -> bool:
-    """Rebuild the weather CSV for `start`..`end` (default: 7 days ahead). False on any failure."""
+    """Rebuild both weather CSVs for `start`..`end` (default: 7 days ahead). False on failure."""
     path = path or WEATHER_PATH
+    hourly_path = hourly_path or WEATHER_HOURLY_PATH
     end = end or (datetime.now(MARKET_TZ).date() + timedelta(days=7))
-    frames = []
+    daily_frames, hourly_frames = [], []
     try:
         for zone in ZONES:
-            frames.append(fetch_zone(zone, start, end))
+            daily, hourly = fetch_zone(zone, start, end)
+            daily_frames.append(daily)
+            hourly_frames.append(hourly)
             time.sleep(pause)
     except Exception:
         log.exception("weather refresh failed; keeping %s", path)
         return False
-    out = with_nyca(pd.concat(frames, ignore_index=True))
+    daily_out = with_nyca(pd.concat(daily_frames, ignore_index=True))
+    hourly_out = with_nyca(pd.concat(hourly_frames, ignore_index=True), key="ts_utc")
     path.parent.mkdir(parents=True, exist_ok=True)
-    out.to_csv(path, index=False)
-    log.info("weather: %d zone-days -> %s", len(out), path)
+    daily_out.to_csv(path, index=False)
+    hourly_out.to_csv(hourly_path, index=False)
+    log.info(
+        "weather: %d zone-days -> %s, %d zone-hours -> %s",
+        len(daily_out),
+        path,
+        len(hourly_out),
+        hourly_path,
+    )
     return True
 
 
@@ -133,12 +155,20 @@ def load_weather(path: Path | None = None) -> pd.DataFrame | None:
     path = path or WEATHER_PATH
     if not path.exists():
         return None
-    df = pd.read_csv(path, parse_dates=["date"])
+    return pd.read_csv(path, parse_dates=["date"])
+
+
+def load_weather_hourly(path: Path | None = None) -> pd.DataFrame | None:
+    path = path or WEATHER_HOURLY_PATH
+    if not path.exists():
+        return None
+    df = pd.read_csv(path)
+    df["ts_utc"] = pd.to_datetime(df["ts_utc"], utc=True)
     return df
 
 
 def features_for(weather: pd.DataFrame | None, zone: str, lead: str = "d2") -> pd.DataFrame | None:
-    """Model-ready day-level features for `zone`: ``date, temp_mean, temp_min, temp_max, temp_dev``.
+    """Day-level features for `zone`: ``date, temp_mean, temp_min, temp_max, temp_dev``.
 
     ``temp_dev`` = forecast mean minus the mean forecast of the seven days ending D-2:
     the "about to leave the recent level" signal, built from forecasts only so it is
@@ -159,3 +189,16 @@ def features_for(weather: pd.DataFrame | None, zone: str, lead: str = "d2") -> p
     trailing = out["temp_mean"].rolling(7, min_periods=3).mean().shift(2)
     out["temp_dev"] = out["temp_mean"] - trailing
     return out.rename_axis("date").reset_index()
+
+
+def hourly_features_for(
+    weather_hourly: pd.DataFrame | None, zone: str, lead: str = "d2"
+) -> pd.DataFrame | None:
+    """Hour-level feature for `zone`: ``hour_utc, temp_h`` (forecast °C valid at that hour)."""
+    if weather_hourly is None or weather_hourly.empty:
+        return None
+    z = weather_hourly[weather_hourly["zone"] == zone]
+    if z.empty:
+        return None
+    out = pd.DataFrame({"hour_utc": z["ts_utc"].dt.floor("h"), "temp_h": z[LEADS[lead]].to_numpy()})
+    return out.drop_duplicates("hour_utc").sort_values("hour_utc").reset_index(drop=True)

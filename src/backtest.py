@@ -25,7 +25,7 @@ from typing import Any
 import pandas as pd
 
 from app.nyiso import PROJECT_ROOT
-from app.weather import features_for
+from app.weather import features_for, hourly_features_for
 from model import DECAY_HALF_LIFE_DAYS, SLOT, LeakageError, cutoff_for, forecast_day
 from src.config import BACKTEST_END, BACKTEST_START, NYCA, ZONES
 from src.settlement import alpha_series
@@ -60,6 +60,7 @@ class BacktestConfig:
     alpha_window_days: int = 30
     weather_lead: str | None = "d2"  # None = no weather features
     target_mode: str = "mw"  # "mw" (load directly) or "ratio" (y / same-slot 3-week mean)
+    hourly_weather: bool = False  # add the forecast temperature at each hour (temp_h)
     workers: int = 1
     results_dir: Path = RESULTS_DIR
     model_overrides: dict[str, Any] = field(default_factory=dict)
@@ -87,6 +88,7 @@ def forecast_one(
     zone_slots: pd.DataFrame,
     weather_feats: pd.DataFrame | None,
     alpha: float,
+    hourly_feats: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """One (zone, day) forecast joined with the actual load; raises on thin history."""
     history = zone_slots[zone_slots["ts_utc"] + SLOT <= cutoff_for(target)]
@@ -95,6 +97,7 @@ def forecast_one(
         history,
         target,
         weather=weather_feats,
+        weather_hourly=hourly_feats,
         quantiles=cfg.quantiles,
         alpha=alpha,
         window_days=cfg.window_days,
@@ -114,6 +117,7 @@ def run_chunk(
     zone_slots: pd.DataFrame,
     weather_feats: pd.DataFrame | None,
     alphas: dict[date, float],
+    hourly_feats: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """Forecast every target of one zone, reusing cached days; returns the chunk's rows."""
     frames = []
@@ -125,7 +129,7 @@ def run_chunk(
         t0 = time.perf_counter()
         try:
             out = forecast_one(
-                cfg, zone, target, zone_slots, weather_feats, alphas.get(target, 0.5)
+                cfg, zone, target, zone_slots, weather_feats, alphas.get(target, 0.5), hourly_feats
             )
         except LeakageError:
             raise
@@ -155,6 +159,7 @@ def run(
     load_slots: pd.DataFrame,
     prices: pd.DataFrame | None,
     weather: pd.DataFrame | None,
+    weather_hourly: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """Run the whole backtest; returns the concatenated results (also saved as CSV)."""
     targets = cfg.targets()
@@ -169,8 +174,11 @@ def run(
             alphas = alpha_series(prices, zone, targets, cfg.alpha_window_days).to_dict()
         else:
             alphas = {}  # NYCA has no zonal price: α = 0.5, no settlement
+        hfeats = None
+        if cfg.hourly_weather and cfg.weather_lead:
+            hfeats = hourly_features_for(weather_hourly, zone, lead=cfg.weather_lead)
         for chunk in _chunks(targets):
-            tasks.append((cfg, zone, chunk, zone_slots, feats, alphas))
+            tasks.append((cfg, zone, chunk, zone_slots, feats, alphas, hfeats))
     log.info(
         "backtest %s: %d zones x %d days in %d chunks, %d workers",
         cfg.name,
@@ -203,11 +211,7 @@ def run(
     return results
 
 
-def _run_task(
-    task: tuple[
-        BacktestConfig, str, list[date], pd.DataFrame, pd.DataFrame | None, dict[date, float]
-    ],
-) -> pd.DataFrame:
+def _run_task(task: tuple[Any, ...]) -> pd.DataFrame:
     return run_chunk(*task)
 
 

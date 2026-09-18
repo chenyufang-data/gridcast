@@ -66,3 +66,19 @@ def test_load_weather_missing_file(tmp_path: Path) -> None:
     _frame().to_csv(tmp_path / "w.csv", index=False)
     loaded = W.load_weather(tmp_path / "w.csv")
     assert loaded is not None and str(loaded["date"].dtype).startswith("datetime64")
+
+
+def test_hourly_features_pick_the_lead() -> None:
+    ts = pd.date_range("2026-01-05 00:00", periods=6, freq="h", tz="UTC")
+    hourly = pd.DataFrame({"ts_utc": ts, "zone": "N.Y.C.", "tfc1": range(6), "tfc2": range(10, 16)})
+    feats = W.hourly_features_for(hourly, "N.Y.C.")
+    assert feats is not None and list(feats.columns) == ["hour_utc", "temp_h"]
+    assert list(feats["temp_h"]) == [10, 11, 12, 13, 14, 15]
+    d1 = W.hourly_features_for(hourly, "N.Y.C.", lead="d1")
+    assert d1 is not None and list(d1["temp_h"]) == [0, 1, 2, 3, 4, 5]
+    assert (
+        W.hourly_features_for(hourly, "WEST") is None
+        and W.hourly_features_for(None, "N.Y.C.") is None
+    )
+    total = W.with_nyca(hourly, key="ts_utc")
+    assert set(total["zone"]) == {"N.Y.C.", "NYCA"} and len(total) == 12
