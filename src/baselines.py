@@ -20,7 +20,7 @@ from datetime import date, timedelta
 import numpy as np
 import pandas as pd
 
-from model import day_grid, local_fields
+from models import day_grid, local_fields
 
 NAIVE = {"persist_2d": (2,), "persist_7d": (7,), "mean_7_14": (7, 14)}
 ISO = ("isolf_pre", "isolf_post")

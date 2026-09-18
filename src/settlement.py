@@ -26,7 +26,7 @@ from datetime import date
 import numpy as np
 import pandas as pd
 
-from model import SLOT, cutoff_for
+from models import SLOT, cutoff_for
 
 MWH_PER_MW_SLOT = 0.25  # 15-min slot
 

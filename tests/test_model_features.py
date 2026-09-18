@@ -1,4 +1,4 @@
-"""Day-type lag anchors, decay floor, and extra hourly weather columns in model.py."""
+"""Day-type lag anchors, decay floor, and extra hourly weather columns in models."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from datetime import date
 import numpy as np
 import pandas as pd
 
-import model as M
+import models as M
 from app import weather as W
 from tests.synthetic import SyntheticNYISO
 from tests.test_model import zone_slots
@@ -84,13 +84,14 @@ def test_decay_floor_keeps_old_rows_weighted() -> None:
             assert sample_weight is not None
             captured["w"] = sample_weight
 
-    m = M.DecayWeightedLGBMRegressor(decay_half_life=32, decay_floor=0.2)
-    m.model = Fake()  # type: ignore[assignment]
+        def predict(self, X: pd.DataFrame) -> np.ndarray:
+            return np.zeros(len(X))
+
+    m = M.DecayWeighted(Fake(), decay_half_life=32, decay_floor=0.2)
     m.fit(X, y)
     w = captured["w"]
     assert w[0] == 1.0 and w[-1] == 0.2 and (w >= 0.2).all()
-    plain = M.DecayWeightedLGBMRegressor(decay_half_life=32)
-    plain.model = Fake()  # type: ignore[assignment]
+    plain = M.DecayWeighted(Fake(), decay_half_life=32)
     plain.fit(X, y)
     assert captured["w"][-1] < 1e-3
 

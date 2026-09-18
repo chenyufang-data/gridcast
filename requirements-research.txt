@@ -1,0 +1,5 @@
+# Research extras: not installed in the images or CI, no lock file (torch wheels come
+# from the CUDA index that matches the GPU, which a universal lock cannot pin).
+#   .\.venv\Scripts\python.exe -m pip install torch --index-url https://download.pytorch.org/whl/cu128
+# models/tft.py imports torch lazily; tests skip it when torch is missing.
+torch>=2.7              # Temporal Fusion Transformer (models/tft.py); sm_120 (RTX 50xx) needs cu128+

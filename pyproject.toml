@@ -28,10 +28,10 @@ ignore = [
 "frontend/*" = ["T20"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["app", "src", "frontend", "model"]
+known-first-party = ["app", "src", "frontend", "models"]
 
 [tool.mypy]
-files = ["app", "src", "frontend", "tests", "scripts", "model.py"]
+files = ["app", "src", "frontend", "tests", "scripts", "models"]
 check_untyped_defs = true
 no_implicit_optional = true
 warn_unused_ignores = true
@@ -45,6 +45,6 @@ pretty = true
 [[tool.mypy.overrides]]
 module = [
     "pandas.*", "lightgbm.*", "sklearn.*", "streamlit.*", "plotly.*",
-    "holidays.*", "matplotlib.*", "requests.*", "dotenv.*",
+    "holidays.*", "matplotlib.*", "requests.*", "dotenv.*", "xgboost.*", "torch.*",
 ]
 ignore_missing_imports = true

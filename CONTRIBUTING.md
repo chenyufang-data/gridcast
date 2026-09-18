@@ -16,7 +16,10 @@ commit `.env`, a database, or any file fetched from NYISO (see `data/README.md`)
 ## Dependencies
 
 Loose specs live in `requirements*.txt`; exact versions in the matching
-`requirements*.lock`, which is what CI, Docker, and developers install. The locks are
+`requirements*.lock`, which is what CI, Docker, and developers install.
+`requirements-research.txt` (torch for `models/tft.py`) is the one exception: it is
+installed by hand from the CUDA index that matches the GPU and has no lock; nothing in
+the images or CI depends on it, and its tests skip when torch is missing. The locks are
 *universal* (one file for Windows dev, Linux CI, and the images) and consistent with
 each other. After editing a `.txt`, regenerate all three:
 
@@ -46,7 +49,7 @@ $uv = ".\.venv\Scripts\uv.exe"
   stamps exist. Dedupe, then resample; never index by position.
 - **Leakage guard.** Any feature or window that touches data at or after the bid cutoff
   (D−1 05:00 ET) is a bug; backtest and scoring code assert it.
-- Layering as in the source repo: `model.py` is shared by `src/` and `app/`;
+- Layering as in the source repo: `models/` is shared by `src/` and `app/`;
   `frontend/` talks to the backend over HTTP only and imports nothing from `app/`.
 
 ## Tests

@@ -1,4 +1,4 @@
-"""model.py: cutoff, DST grid, repair, lag alignment, leakage guard, real fits on synthetic data."""
+"""models: cutoff, DST grid, repair, lag alignment, leakage guard, real fits on synthetic data."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-import model as M
+import models as M
 from app import nyiso
 from tests.conftest import FALL_BACK_DAY, SPRING_FORWARD_DAY
 from tests.synthetic import SyntheticNYISO

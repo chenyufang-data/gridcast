@@ -4,6 +4,9 @@
     python scripts/run_backtest.py --zones N.Y.C. --start 2025-09-01 --end 2025-09-30 --workers 1
     python scripts/run_backtest.py --name no_weather --no-weather
     python scripts/run_backtest.py --name w28 --window 28
+    python scripts/run_backtest.py --name xgb --estimator xgb --zones NYCA N.Y.C. MHK VL
+    python scripts/run_backtest.py --name swap --augment swap --swap-p 0.1
+    python scripts/run_backtest.py --name h12 --history-start 2025-06-01   # 12 months of data
 
 Requires data/processed (scripts/backfill.py) and, unless --no-weather, data/weather.csv
 (scripts/fetch_weather.py). Results: results/<name>/results.csv (+ per-day cache) and
@@ -21,42 +24,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import pandas as pd  # noqa: E402
-
 from app import weather  # noqa: E402
 from app.log import configure_logging  # noqa: E402
 from src import dataset  # noqa: E402
-from src.backtest import BacktestConfig, run  # noqa: E402
+from src.backtest import BacktestConfig, run, summarize_results  # noqa: E402
 from src.config import BACKTEST_END, BACKTEST_START, NYCA, ZONES  # noqa: E402
-from src.metrics import mape, to_hourly  # noqa: E402
 from src.settlement import slot_prices  # noqa: E402
-
-
-def summarize(results: pd.DataFrame) -> pd.DataFrame:
-    """Per-zone and pooled MAPE at hourly and 15-min resolution, days scored, band coverage."""
-    hourly = to_hourly(results, ["pred", "p10", "p90", "actual"], keys=["zone"])
-    rows = []
-    groups = [
-        (z, results[results["zone"] == z], hourly[hourly["zone"] == z])
-        for z in sorted(results["zone"].unique())
-    ]
-    groups.append(("pooled", results, hourly))
-    for zone, r, h in groups:
-        inside = ((r["p10"] <= r["actual"]) & (r["actual"] <= r["p90"])).mean() * 100
-        rows.append(
-            {
-                "zone": zone,
-                "days": r["date"].nunique(),
-                "mape_hourly": mape(h["actual"], h["pred"]),
-                "mape_slot": mape(r["actual"], r["pred"]),
-                "mape_alpha_bid_hourly": mape(
-                    h["actual"], to_hourly(r, ["p_alpha"], ["zone"])["p_alpha"]
-                ),
-                "p10_p90_coverage": inside,
-                "alpha_mean": r["alpha"].mean(),
-            }
-        )
-    return pd.DataFrame(rows)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -93,6 +66,27 @@ def main(argv: list[str] | None = None) -> int:
         "--daytype", action="store_true", help="weekend/holiday type + same-type lag anchors"
     )
     parser.add_argument("--decay-floor", type=float, default=0.0, help="minimum sample weight")
+    parser.add_argument(
+        "--estimator", choices=["lgbm", "xgb"], default="lgbm", help="boosting library"
+    )
+    parser.add_argument(
+        "--augment", choices=["swap"], default=None, help="training-row augmentation"
+    )
+    parser.add_argument("--swap-p", type=float, default=0.1, help="swap-noise cell probability")
+    parser.add_argument("--swap-copies", type=int, default=1, help="augmented copies per row")
+    parser.add_argument("--swap-weight", type=float, default=0.5, help="weight of a copy")
+    parser.add_argument(
+        "--swap-within",
+        choices=["tod", "none"],
+        default="tod",
+        help="donor rows share this column (tod) or come from anywhere (none)",
+    )
+    parser.add_argument(
+        "--history-start",
+        type=date.fromisoformat,
+        default=None,
+        help="ignore load before this day, e.g. 2025-06-01 reproduces the 12-month data runs",
+    )
     parser.add_argument("--num-leaves", type=int, default=31)
     parser.add_argument("--min-child-samples", type=int, default=30)
     parser.add_argument("--learning-rate", type=float, default=0.02)
@@ -127,6 +121,15 @@ def main(argv: list[str] | None = None) -> int:
         extra_weather=args.extra_weather,
         daytype=args.daytype,
         decay_floor=args.decay_floor,
+        estimator=args.estimator,
+        augment=args.augment,
+        augment_params={
+            "p": args.swap_p,
+            "copies": args.swap_copies,
+            "weight": args.swap_weight,
+            "within": None if args.swap_within == "none" else args.swap_within,
+        },
+        history_start=args.history_start,
         model_overrides={
             "n_estimators": args.n_estimators,
             "learning_rate": args.learning_rate,
@@ -154,14 +157,16 @@ def main(argv: list[str] | None = None) -> int:
     if results.empty:
         print("no results", file=sys.stderr)
         return 1
-    summary = summarize(results)
+    summary = summarize_results(results)
     summary.to_csv(cfg.out_dir / "summary.csv", index=False)
     print(
         f"\nbacktest {cfg.name!r}: {cfg.start} .. {cfg.end}, window {cfg.window_days}d, "
         f"half-life {cfg.half_life}d, weather {cfg.weather_lead or 'off'}, target {cfg.target_mode}, "
         f"hourly weather {cfg.hourly_weather}, trees {cfg.model_overrides.get('n_estimators')} "
         f"@ lr {cfg.model_overrides.get('learning_rate')}, leaves {cfg.model_overrides.get('num_leaves')}, "
-        f"extra weather {cfg.extra_weather}, daytype {cfg.daytype}, decay floor {cfg.decay_floor}"
+        f"extra weather {cfg.extra_weather}, daytype {cfg.daytype}, decay floor {cfg.decay_floor}, "
+        f"estimator {cfg.estimator}, augment {cfg.augment or 'off'}"
+        f"{' ' + str(cfg.augment_params) if cfg.augment else ''}, history from {cfg.history_start or 'all data'}"
     )
     print(
         f"protocol: retrain per zone and day on slots ending <= D-1 05:00 ET; {time.perf_counter() - t0:.0f}s wall\n"

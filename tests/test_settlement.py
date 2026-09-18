@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-import model as M
+import models as M
 from src import settlement as S
 
 

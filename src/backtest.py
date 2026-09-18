@@ -2,7 +2,7 @@
 
 Protocol (docs/plan.md §3): for every target day ``D`` in the range and every zone,
 train on the zone's slots ending at or before the cutoff (the leakage guard in
-:func:`model.forecast_day` enforces it), forecast the 96 (92/100) slots of ``D`` with
+:func:`models.forecast_day` enforces it), forecast the 96 (92/100) slots of ``D`` with
 the median, the P10/P90 band and the α-quantile bid, where α is the newsvendor ratio
 of the trailing price spread as of the same cutoff (:mod:`src.settlement`).
 
@@ -26,8 +26,9 @@ import pandas as pd
 
 from app.nyiso import PROJECT_ROOT
 from app.weather import features_for, hourly_features_for
-from model import SLOT, LeakageError, cutoff_for, forecast_day
+from models import SLOT, LeakageError, cutoff_for, forecast_day, local_midnight_utc
 from src.config import BACKTEST_END, BACKTEST_START, NYCA, ZONES
+from src.metrics import mape, to_hourly
 from src.settlement import alpha_series
 
 log = logging.getLogger(__name__)
@@ -64,6 +65,10 @@ class BacktestConfig:
     extra_weather: bool = True  # apparent temp, dew point, humidity, cloud, wind, radiation
     daytype: bool = False  # weekend/holiday type and same-type lag anchors
     decay_floor: float = 0.0  # minimum sample weight (keeps last year's season in range)
+    estimator: str = "lgbm"  # models.tabular.ESTIMATORS: "lgbm" (default) or "xgb"
+    augment: str | None = None  # models.augment.KINDS ("swap") or None
+    augment_params: dict[str, Any] = field(default_factory=dict)
+    history_start: date | None = None  # ignore load before this local day (data-length runs)
     workers: int = 1
     results_dir: Path = RESULTS_DIR
     model_overrides: dict[str, Any] = field(default_factory=dict)
@@ -112,6 +117,9 @@ def forecast_one(
         model_overrides=overrides,
         target_mode=cfg.target_mode,
         daytype=cfg.daytype,
+        estimator=cfg.estimator,
+        augment_kind=cfg.augment,
+        augment_params=cfg.augment_params,
     )
     out.insert(0, "zone", zone)
     actual = zone_slots[["ts_utc", "load_mw"]].rename(columns={"load_mw": "actual"})
@@ -172,6 +180,7 @@ def run(
 ) -> pd.DataFrame:
     """Run the whole backtest; returns the concatenated results (also saved as CSV)."""
     targets = cfg.targets()
+    load_slots = restrict_history(load_slots, cfg.history_start)
     tasks = []
     for zone in cfg.zones:
         zone_slots = load_slots[load_slots["zone"] == zone].reset_index(drop=True)
@@ -191,8 +200,10 @@ def run(
         for chunk in _chunks(targets):
             tasks.append((cfg, zone, chunk, zone_slots, feats, alphas, hfeats))
     log.info(
-        "backtest %s: %d zones x %d days in %d chunks, %d workers",
+        "backtest %s (%s%s): %d zones x %d days in %d chunks, %d workers",
         cfg.name,
+        cfg.estimator,
+        f" + {cfg.augment}" if cfg.augment else "",
         len(cfg.zones),
         len(targets),
         len(tasks),
@@ -224,6 +235,41 @@ def run(
 
 def _run_task(task: tuple[Any, ...]) -> pd.DataFrame:
     return run_chunk(*task)
+
+
+def restrict_history(load_slots: pd.DataFrame, history_start: date | None) -> pd.DataFrame:
+    """Drop slots before the local midnight of `history_start` (None = keep everything)."""
+    if history_start is None:
+        return load_slots
+    keep = load_slots["ts_utc"] >= local_midnight_utc(history_start)
+    return load_slots[keep].reset_index(drop=True)
+
+
+def summarize_results(results: pd.DataFrame) -> pd.DataFrame:
+    """Per-zone and pooled MAPE at hourly and 15-min resolution, days scored, band coverage."""
+    hourly = to_hourly(results, ["pred", "p10", "p90", "actual"], keys=["zone"])
+    rows = []
+    groups = [
+        (z, results[results["zone"] == z], hourly[hourly["zone"] == z])
+        for z in sorted(results["zone"].unique())
+    ]
+    groups.append(("pooled", results, hourly))
+    for zone, r, h in groups:
+        inside = ((r["p10"] <= r["actual"]) & (r["actual"] <= r["p90"])).mean() * 100
+        rows.append(
+            {
+                "zone": zone,
+                "days": r["date"].nunique(),
+                "mape_hourly": mape(h["actual"], h["pred"]),
+                "mape_slot": mape(r["actual"], r["pred"]),
+                "mape_alpha_bid_hourly": mape(
+                    h["actual"], to_hourly(r, ["p_alpha"], ["zone"])["p_alpha"]
+                ),
+                "p10_p90_coverage": inside,
+                "alpha_mean": r["alpha"].mean(),
+            }
+        )
+    return pd.DataFrame(rows)
 
 
 def load_results(name: str, results_dir: Path = RESULTS_DIR) -> pd.DataFrame:

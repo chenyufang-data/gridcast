@@ -1,19 +1,19 @@
-"""Modeling core: slot grid, repair, features as of the bid cutoff, LightGBM wrapper.
+"""Calendar, slot grid, repair and the feature table as of the bid cutoff.
 
-Shared by ``src/`` (offline backtest) and ``app/`` (service), like the source repo.
-Everything is relative to a target day ``D`` (local ET) and its bid cutoff
+Shared by every estimator in :mod:`models` and by ``src/`` (backtest) and ``app/``
+(service). Everything is relative to a target day ``D`` (local ET) and its bid cutoff
 ``D-1 05:00 ET`` (``src.config.BID_CUTOFF_TIME``):
 
 - ``history`` is the 15-min slot frame of one zone (``ts_utc, load_mw[, coverage]``)
-  and must end at or before the cutoff: :func:`forecast_day` raises
+  and must end at or before the cutoff: :func:`models.forecast_day` raises
   :class:`LeakageError` otherwise, so no caller can train on the future by accident.
 - Lag features align on the wall-clock quarter hour (``tod`` = 0..95), so DST days line
   up with human schedules; the output grid is chronological (92 / 96 / 100 slots).
 - The partial day ``D-1`` (00:00-04:45, 20 slots) feeds "morning" level features; every
   training target ``T <= D-2`` is featurized the same way, as of its own cutoff.
 - Weather is optional: a day-level frame (``date, temp_mean, temp_min, temp_max,
-  temp_dev``) built from day-ahead-issued forecasts by ``app.weather``; without it the
-  feature set degrades gracefully.
+  temp_dev``) and an hour-level frame built from day-ahead-issued forecasts by
+  ``app.weather``; without them the feature set degrades gracefully.
 """
 
 from __future__ import annotations
@@ -21,12 +21,10 @@ from __future__ import annotations
 import logging
 from datetime import date, datetime, timedelta
 from functools import lru_cache
-from typing import Any
 
 import holidays
 import numpy as np
 import pandas as pd
-from lightgbm import LGBMRegressor
 
 from src.config import BID_CUTOFF_TIME, MARKET_TZ, SLOTS_PER_HOUR
 
@@ -44,15 +42,13 @@ ALL_LAGS = [f"lag_{k}d" for k in LAGS]
 WEATHER_FEATURES = ["temp_mean", "temp_min", "temp_max", "temp_dev"]
 WEATHER_HOURLY_FEATURES = ["temp_h"]
 AGE_COL = "_age_days"  # days before the newest training day; only for decay weights
-FEATURE_VERSION = "nyiso-fv1"  # bump when features or hyper-parameters change
+FEATURE_VERSION = "nyiso-fv1"  # bump when the feature table changes (estimator names are separate)
 
 # --- repair thresholds (port of the source; NYISO data rarely triggers them) --------
 ABNORMAL_ZERO_EPS = 1e-6
 ABNORMAL_LOW_RATIO = 0.30
 ABNORMAL_HIGH_RATIO = 3.0
 WEEK_NEIGHBOR_OFFSETS = (7, -7, 14, -14)
-
-DECAY_HALF_LIFE_DAYS = 32
 
 
 class LeakageError(ValueError):
@@ -313,165 +309,8 @@ def feature_columns(
     ]  # fmt: skip
 
 
-# ---------------------------------------------------------------------------- model
-class DecayWeightedLGBMRegressor:
-    """LightGBM with time-decay sample weights ``0.5 ** (age_days / half_life)``.
-
-    Softer than a hard window: data just outside the window fades instead of vanishing,
-    recent behaviour dominates, older weekly structure is kept.
-    """
-
-    def __init__(
-        self,
-        decay_half_life: float = DECAY_HALF_LIFE_DAYS,
-        decay_floor: float = 0.0,
-        **lgbm_params: Any,
-    ) -> None:
-        self.decay_half_life = decay_half_life
-        self.decay_floor = decay_floor
-        self.lgbm_params = lgbm_params
-        self.model = LGBMRegressor(**lgbm_params)
-
-    @staticmethod
-    def _pop_age(X: pd.DataFrame) -> tuple[pd.DataFrame, np.ndarray | None]:
-        if AGE_COL in X.columns:
-            return X.drop(columns=[AGE_COL]), X[AGE_COL].to_numpy(dtype=float)
-        return X, None
-
-    def fit(self, X: pd.DataFrame, y: pd.Series | np.ndarray) -> DecayWeightedLGBMRegressor:
-        X, age = self._pop_age(X)
-        weight = None
-        if age is not None and self.decay_half_life:
-            weight = np.maximum(0.5 ** (age / self.decay_half_life), self.decay_floor)
-        self.model.fit(X, y, sample_weight=weight)
-        return self
-
-    def predict(self, X: pd.DataFrame) -> np.ndarray:
-        X, _ = self._pop_age(X)
-        return np.asarray(self.model.predict(X), dtype=float)
-
-
-def get_model(**overrides: Any) -> DecayWeightedLGBMRegressor:
-    """Default median configuration; overrides derive variants (quantile objective + alpha)."""
-    params: dict[str, Any] = dict(
-        decay_half_life=DECAY_HALF_LIFE_DAYS,
-        objective="mae",
-        n_estimators=600,
-        learning_rate=0.02,
-        num_leaves=31,
-        max_depth=5,
-        min_child_samples=30,
-        subsample=0.7,
-        subsample_freq=1,
-        colsample_bytree=0.6,
-        reg_alpha=0.1,
-        reg_lambda=1.0,
-        random_state=0,
-        verbose=-1,
-    )
-    params.update(overrides)
-    return DecayWeightedLGBMRegressor(**params)
-
-
-# ---------------------------------------------------------------------------- one forecast
-def _ratio_denominator(rows: pd.DataFrame) -> pd.Series:
-    """Level the ratio target is expressed against: same-slot mean of the last three weeks."""
-    return rows["lag_week_mean"].fillna(rows["lag_all_mean"])
-
-
 def training_targets(target: date, window_days: int, available: pd.Index) -> list[pd.Timestamp]:
     """Training days: ``[D-1-window, D-2]`` (complete before the cutoff) that have data."""
     last = pd.Timestamp(target) - pd.Timedelta(days=2)
     first = pd.Timestamp(target) - pd.Timedelta(days=1 + window_days)
     return [d for d in available if first <= d <= last]
-
-
-def forecast_day(
-    history: pd.DataFrame,
-    target: date,
-    *,
-    weather: pd.DataFrame | None = None,
-    weather_hourly: pd.DataFrame | None = None,
-    quantiles: tuple[float, ...] = (0.1, 0.9),
-    alpha: float | None = None,
-    window_days: int = 365,
-    model_overrides: dict[str, Any] | None = None,
-    target_mode: str = "mw",
-    daytype: bool = False,
-) -> pd.DataFrame:
-    """Train on `history` (one zone, slots ending at or before the cutoff) and forecast `target`.
-
-    Returns the chronological grid of `target` with ``pred`` (median), one column per
-    requested quantile (``p10``, ``p90``, ...) and, when `alpha` is given, ``p_alpha``
-    (the α-quantile bid, or the median when α is 0.5).
-
-    `target_mode`: ``"ratio"`` fits ``y / lag_week_mean`` (the same slot's mean over the
-    three previous weeks) and rescales the predictions, which lets trees follow level
-    shifts they never saw in the window; ``"mw"`` fits the load directly.
-    """
-    cutoff = cutoff_for(target)
-    if history.empty:
-        raise ValueError("empty history")
-    last_end = history["ts_utc"].max() + SLOT
-    if last_end > cutoff:
-        raise LeakageError(f"history ends {last_end}, after the cutoff {cutoff} for {target}")
-
-    series = regularize(history)
-    repaired, _ = repair(series)
-    fields = local_fields(pd.Series(repaired.index, index=repaired.index))
-    targets = training_targets(target, window_days, pd.Index(fields["date"].unique()))
-    if len(targets) < MIN_TRAIN_DAYS:
-        raise ValueError(
-            f"only {len(targets)} training days before {target}; need {MIN_TRAIN_DAYS}"
-        )
-
-    rows, cols = build_features(repaired, targets, target, weather, weather_hourly, daytype)
-    train = rows[rows["y"].notna() & rows["lag_7d"].notna()]
-    pred_rows = (
-        rows[rows["date"] == pd.Timestamp(target)].sort_values("slot").reset_index(drop=True)
-    )
-    if train.empty or pred_rows.empty:
-        raise ValueError("no usable training rows")
-    if target_mode == "ratio":
-        denom_train = _ratio_denominator(train)
-        denom_pred = _ratio_denominator(pred_rows)
-        keep = denom_train.notna() & (denom_train > 0)
-        train, denom_train = train[keep], denom_train[keep]
-        y = train["y"] / denom_train
-        scale = denom_pred.fillna(denom_pred.mean()).to_numpy()
-    elif target_mode == "mw":
-        y = train["y"]
-        scale = np.ones(len(pred_rows))
-    else:
-        raise ValueError(f"unknown target_mode {target_mode!r}")
-    X = train[cols]
-    Xp = pred_rows[cols]
-    overrides = dict(model_overrides or {})
-
-    out = pred_rows[["ts_utc", "date", "slot", "tod"]].copy()
-    out["pred"] = get_model(**overrides).fit(X, y).predict(Xp) * scale
-    fitted: dict[float, np.ndarray] = {}
-    for q in quantiles:
-        fitted[q] = (
-            get_model(objective="quantile", alpha=q, **overrides).fit(X, y).predict(Xp) * scale
-        )
-        out[f"p{int(round(q * 100))}"] = fitted[q]
-    if alpha is not None:
-        if abs(alpha - 0.5) < 1e-9:
-            out["p_alpha"] = out["pred"].to_numpy()
-        elif alpha in fitted:
-            out["p_alpha"] = fitted[alpha]
-        else:
-            out["p_alpha"] = (
-                get_model(objective="quantile", alpha=float(alpha), **overrides)
-                .fit(X, y)
-                .predict(Xp)
-                * scale
-            )
-        out["alpha"] = float(alpha)
-    # quantile crossing: keep the band ordered around the median
-    if {"p10", "p90"} <= set(out.columns):
-        lo = np.minimum(out["p10"], out["pred"])
-        hi = np.maximum(out["p90"], out["pred"])
-        out["p10"], out["p90"] = lo, hi
-    return out

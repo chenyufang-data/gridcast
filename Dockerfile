@@ -12,7 +12,7 @@ COPY requirements.lock .
 RUN pip install --no-cache-dir -r requirements.lock
 
 COPY src/ src/
-COPY model.py .
+COPY models/ models/
 COPY app/ app/
 
 # SQLite and the NYISO fetch cache live on a mounted volume so they survive
