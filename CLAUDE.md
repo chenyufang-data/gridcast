@@ -71,13 +71,15 @@ lock file, logging, type hints, LICENSE, data provenance, year-proof holidays).
   Gotcha: a 12-worker run once died with `BrokenProcessPool` near its end while the
   machine was loaded; re-running the same `--name` resumed from the per-day cache in
   two minutes.
-- **Next action: decide the shipped model, then Phase 3.** Run the full 12-zone backtests
-  on 24 months of data — `scripts/run_backtest.py --name default24 --workers 14` (~110 min)
-  and `scripts/run_tft.py --name tft_full --train-zones all` (~40 min, GPU) — plus the
-  report scripts on both, then apply the headline rules. If the TFT holds up, Phase 3
-  serves it (CPU inference is instant; the monthly refit runs on the laptop and the weights
-  ship as an artifact, or the VM refits on CPU); otherwise the trees stay the served model.
-  Phase 3 itself: backend port: `app/db.py` (zones, load/price tables,
+- **Next action: full 12-zone runs, then Phase 3 with both models.** Run
+  `scripts/run_backtest.py --name default24 --workers 14` (~110 min) and
+  `scripts/run_tft.py --name tft_full --train-zones all` (~40 min, GPU) plus the report
+  scripts on both, then apply the headline rules. Phase 3 serves the ONNX TFT (new:
+  `scripts/export_tft.py` = fit on the laptop → ONNX + scaling constants + version hash,
+  with the torch-vs-ORT check; `onnxruntime` joins requirements.txt; the service loads the
+  file from the data volume and falls back to the trees when it is missing or stale) and
+  the trees (train-on-demand, the demo's retrain button, nightly scheduler). Phase 3
+  itself: backend port: `app/db.py` (zones, load/price tables,
   forecasts + values, `schedules`, `forecast_scores` with `imbalance_usd` / `da_cost_usd`,
   alerts), `app/service.py` (ingest via `ArchiveClient` + `resample_slots`, train-on-demand
   via `models.forecast_day` (or the TFT) with the conformal band scaling and the α-bid, versioning hash
@@ -106,6 +108,7 @@ lock file, logging, type hints, LICENSE, data provenance, year-proof holidays).
 | Domain | `https://gridcast.cyfang.org`; user adds the DNS A record; Caddy auto-HTTPS |
 | Demo video | < 2:00, English, **the user's own voice + burned-in captions**; deliver speech notes (~150 wpm, ≤ 260 words) and an SRT file |
 | Heavy compute | the 12-zone × 12-month backtest runs on the user's laptop; the VM only does daily incremental fetch + one forecast per zone |
+| Served models (decided 2026-09-18) | **TFT exported to ONNX on the laptop and uploaded monthly** (export pins eval mode and is verified against torch on fresh inputs: 1.3e-6 agreement, dynamic batch, 79 ms for 12 zones on CPU, 2.2 MB file); the VM runs it with `onnxruntime` only, never torch. **LightGBM trees stay the fallback and the model the demo retrains live.** VM stays **e2-small**. A monthly TFT refit on the VM is ruled out by measurement (50 min on two fast laptop threads, 4.2 GB resident) |
 
 ## Verified NYISO facts (2026-09-17; full table and gotchas in `data/README.md`)
 

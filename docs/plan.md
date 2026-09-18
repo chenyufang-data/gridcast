@@ -81,7 +81,10 @@ Weather: Open-Meteo previous-runs API for each zone centroid, D−1-issued forec
   (lag / day total); calendar (slot, weekday, US federal + NY holidays via `holidays`);
   weather (D−1-issued tmean/tmax/tmin for D and deviation from trailing 7-day actual).
   The ISO forecast as a *feature* is excluded by default (Q8).
-- **Models**: LightGBM MAE + time-decay weights (port `DecayWeightedLGBMRegressor`);
+- **Models** (updated 2026-09-18): a Temporal Fusion Transformer (`models/tft.py`, global over
+  zones, monthly refit on the laptop, exported to ONNX and served with `onnxruntime`) is the
+  accuracy model; the trees below are the fallback and the model the demo retrains live.
+  Original plan: LightGBM MAE + time-decay weights (port `DecayWeightedLGBMRegressor`);
   quantiles α=0.1/0.9 for the band; a third quantile model at the estimated α per zone for
   the bid. Sensitivity sweep, not tuning; experiment log with negative results.
 - **Backtest**: rolling daily retrain, **2025-09-01 → 2026-08-31** (12 months, all four

@@ -3,3 +3,5 @@
 #   .\.venv\Scripts\python.exe -m pip install torch --index-url https://download.pytorch.org/whl/cu128
 # models/tft.py imports torch lazily; tests skip it when torch is missing.
 torch>=2.7              # Temporal Fusion Transformer (models/tft.py); sm_120 (RTX 50xx) needs cu128+
+onnx>=1.16              # export side of the served TFT (the VM needs only onnxruntime)
+onnxscript>=0.2         # required by torch.onnx.export's torch.export path
