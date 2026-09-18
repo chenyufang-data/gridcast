@@ -166,7 +166,11 @@ def main(argv: list[str] | None = None) -> int:
         ]
     ]
     view["usd_per_day"] = view["imbalance_usd"] / days
-    print(view.round(0).astype({"usd_per_mwh": float, "pct_of_da_cost": float}).to_string())
+    money = ["imbalance_usd", "ci95_low", "ci95_high", "abs_imbalance_usd", "usd_per_day"]
+    shown = view.copy()
+    shown[money] = shown[money].round(0)
+    shown[["usd_per_mwh", "pct_of_da_cost"]] = shown[["usd_per_mwh", "pct_of_da_cost"]].round(3)
+    print(shown.to_string())
     print(
         "\nci95 = bootstrap over days (2000 resamples); overlapping intervals are not distinguishable"
     )

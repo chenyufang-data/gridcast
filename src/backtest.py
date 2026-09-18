@@ -54,13 +54,13 @@ class BacktestConfig:
     start: date = BACKTEST_START
     end: date = BACKTEST_END
     zones: tuple[str, ...] = (*ZONES, NYCA)
-    window_days: int = 56
+    window_days: int = 120
     half_life: float = DECAY_HALF_LIFE_DAYS
     quantiles: tuple[float, ...] = (0.1, 0.9)
     alpha_window_days: int = 30
     weather_lead: str | None = "d2"  # None = no weather features
     target_mode: str = "mw"  # "mw" (load directly) or "ratio" (y / same-slot 3-week mean)
-    hourly_weather: bool = False  # add the forecast temperature at each hour (temp_h)
+    hourly_weather: bool = True  # forecast temperature at each hour (temp_h); the sweep winner
     workers: int = 1
     results_dir: Path = RESULTS_DIR
     model_overrides: dict[str, Any] = field(default_factory=dict)
