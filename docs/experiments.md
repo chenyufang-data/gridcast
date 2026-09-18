@@ -132,6 +132,35 @@ those, not to a three-zone table); the Phase 3 consequence (the VM would need to
 monthly refit on the laptop and the weights shipped as an artifact, or the trees stay the
 served model).
 
+## 2d. Data augmentation (NYCA, N.Y.C., MHK VL, full 12 months)
+
+Five augmentation techniques suited to load series, each against the run it modifies on
+identical zone-days (`compare_runs.py --bootstrap`). Trees: `--augment <kind>` of
+`run_backtest.py` on the `lgbm24` configuration; TFT: `run_tft.py --aggregate` /
+`--blockboot` on the `tft24` configuration. Implementation: `models/augment.py`,
+`models/tft.py` (`aggregate_zone`, `block_bootstrap`).
+
+| Run | Technique | Base | Pooled | Δ [95% CI] | Raw P10–P90 | Wall time | Verdict |
+|---|---|---|---|---|---|---|---|
+| `swap24` | swap noise (p 0.1, donors within the tod, one copy at weight 0.5) | `lgbm24` 5.08 | 5.09 | +0.01 [−0.02, +0.03] | 58% | ~45 min | null |
+| `wnoise24` | weather-forecast-error injection: per-day temperature offset σ 1.55 °C + hourly jitter σ 1.58 °C (the spread of the 2-day-lead forecast updates), one copy at weight 0.5 | `lgbm24` 5.08 | 5.21 | **+0.13 [+0.09, +0.18]** | 58% | 51 min | worse, most in June–July (+0.26 / +0.40): noised temperatures make the trees under-use the forecast exactly when it matters most |
+| `extreme24` | weight 3 on rows of hot / cold-decile days or days with a top-decile temperature swing (no new rows) | `lgbm24` 5.08 | 5.22 | **+0.13 [+0.09, +0.17]** | 58% | 26 min | worse in every month: the typical-day fit degrades more than the tail gains |
+| `cmixup24` | C-Mixup within the tod, partner among the 5 nearest targets, λ ~ Beta(2, 2), one copy at weight 0.5 | `lgbm24` 5.08 | 5.33 | **+0.25 [+0.19, +0.31]** | 57% | 49 min | worse: interpolated rows blur the lag-to-load mapping the trees rely on |
+| `tft24_agg` | 12 synthetic zones = sums of random 2–4 zone subsets (loads add exactly, weather load-weighted) as extra training series | `tft24` 4.40 | 4.48 | +0.08 [−0.01, +0.17] | 74% | 46 min (2× fit time) | null overall; N.Y.C. −0.21, MHK VL +0.32: the aggregates pull the shared weights toward large-zone behaviour |
+| `tft24_boot` | one residual block-bootstrap replica per zone per fit (trend + weekday/tod profile + day-block resampled residual) | `tft24` 4.40 | 5.01 | **+0.61 [+0.48, +0.75]** | 84% | 48 min (2× fit time) | clearly worse: resampled residuals are pasted onto the wrong weather, so the network learns that weather explains less than it does |
+
+Trade-offs, in one paragraph: none of the five buys accuracy, and the two that change the
+weather–load coupling (`wnoise`, `blockboot`) are the most harmful, which is the useful
+lesson. The load problem is not data-starved in the way augmentation fixes: every training
+day already carries its true weather, and any synthetic row either repeats that information
+(swap, aggregates: null) or corrupts it (noise, mixup, bootstrap: worse). The only
+augmentation-like change that helped was more real data (§2c, 24 months, −0.26). Costs:
+every copy-making kind doubles the training rows, so the tree runs take 1.7–2× longer
+(26–51 min vs 29 min for the three zones) and the TFT fits 2×; code complexity is small
+(one function per kind) and all kinds stay available behind flags for the record.
+Frequency masking of the encoder was not run (lowest prior, and both TFT variants were
+already null or negative).
+
 ## 3. Full run (11 zones + NYCA)
 
 Run before §2c, i.e. on the archive starting 2025-06-01 (12 months of data).
@@ -201,6 +230,8 @@ Negative or null results (kept so nobody repeats them):
 - Signed imbalance dollars over 12 months cannot rank strategies (see §3.2).
 - XGBoost instead of LightGBM: −0.02 [−0.07, +0.02] on 24 months of data (§2c).
 - Swap-noise augmentation of the training rows: +0.01 [−0.02, +0.03] (§2c).
+- Weather-error injection +0.13, extreme-day weights +0.13, C-Mixup +0.25 (trees);
+  aggregate zones +0.08 (null), residual block bootstrap +0.61 (TFT): §2d.
 
 Open items, in the order they are likely to pay off:
 
