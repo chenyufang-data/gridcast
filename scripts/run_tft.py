@@ -23,11 +23,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
 from app import weather  # noqa: E402
 from app.log import configure_logging  # noqa: E402
-from app.weather import hourly_features_for  # noqa: E402
+from app.weather import ZONE_WEIGHT, hourly_features_for  # noqa: E402
 from models import cutoff_for  # noqa: E402
 from models import tft as T  # noqa: E402
 from src import dataset  # noqa: E402
@@ -68,6 +69,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--val-days", type=int, default=14, help="last days of the window")
     parser.add_argument("--alpha-window", type=int, default=30)
     parser.add_argument("--history-start", type=date.fromisoformat, default=None)
+    parser.add_argument(
+        "--aggregate",
+        type=int,
+        default=0,
+        help="extra training series: sums of this many random zone subsets (2-4 zones each)",
+    )
+    parser.add_argument(
+        "--blockboot",
+        type=int,
+        default=0,
+        help="bootstrap replicas per real training zone per fit (residual block bootstrap)",
+    )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--device", default=None, help="cuda / cpu (default: auto)")
     args = parser.parse_args(argv)
@@ -105,13 +118,22 @@ def main(argv: list[str] | None = None) -> int:
             print(f"no load data for {z}", file=sys.stderr)
             return 2
         zd[z] = T.prepare_zone(z, zs, hourly_features_for(whourly, z, extra=True), cfg.end)
+    real_zones = [z for z in train_zones if z != NYCA]
+    aug_rng = np.random.default_rng(args.seed)
+    synth: list[str] = []
+    for i in range(args.aggregate):
+        members = list(aug_rng.choice(real_zones, size=int(aug_rng.integers(2, 5)), replace=False))
+        name = f"agg{i}:" + "+".join(members)
+        zd[name] = T.aggregate_zone(name, [zd[m] for m in members], ZONE_WEIGHT)
+        synth.append(name)
+    fit_zones = (*train_zones, *synth)
     alphas = {
         z: alpha_series(prices, z, targets, cfg.alpha_window_days).to_dict() if z != NYCA else {}
         for z in zones
     }
     actual = load_slots[["zone", "ts_utc", "load_mw"]].rename(columns={"load_mw": "actual"})
     forecaster = T.TFTForecaster(
-        list(train_zones),
+        list(fit_zones),
         enc_days=args.enc_days,
         hidden=args.hidden,
         heads=args.heads,
@@ -125,10 +147,13 @@ def main(argv: list[str] | None = None) -> int:
         seed=args.seed,
     )
     log.info(
-        "tft backtest %s: forecast %s, train on %d zones, %d days, refit every %d days, %s",
+        "tft backtest %s: forecast %s, train on %d zones (+%d aggregates, %d replicas each), "
+        "%d days, refit every %d days, %s",
         cfg.name,
         zones,
         len(train_zones),
+        len(synth),
+        args.blockboot,
         len(targets),
         args.refit_days,
         T.describe(forecaster),
@@ -143,11 +168,16 @@ def main(argv: list[str] | None = None) -> int:
             d0 = block[0]
             c0 = cutoff_for(d0)
             fit_data = {}
-            for z in train_zones:
+            for z in fit_zones:
                 y0, tod_means[z] = T.series_asof(zd[z], c0)
                 fit_data[z] = (zd[z], y0)
+            replicas = [
+                (zd[z], T.block_bootstrap(zd[z], fit_data[z][1], aug_rng))
+                for z in train_zones
+                for _ in range(args.blockboot)
+            ]
             train_days = [d0 - timedelta(days=k) for k in range(args.window + 1, 1, -1)]
-            forecaster.fit(fit_data, train_days)
+            forecaster.fit(fit_data, train_days, replicas=replicas)
             fits += 1
         for d in block:
             for z in zones:
@@ -186,7 +216,8 @@ def main(argv: list[str] | None = None) -> int:
     summary.to_csv(cfg.out_dir / "summary.csv", index=False)
     print(
         f"\ntft {cfg.name!r}: {cfg.start} .. {cfg.end}, window {cfg.window_days}d, refit every "
-        f"{args.refit_days}d ({fits} fits this run), train zones {len(train_zones)}, "
+        f"{args.refit_days}d ({fits} fits this run), train zones {len(train_zones)} "
+        f"+ {len(synth)} aggregates, {args.blockboot} bootstrap replicas per zone, "
         f"{T.describe(forecaster)}, history from {cfg.history_start or 'all data'}"
     )
     print(

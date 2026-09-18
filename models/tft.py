@@ -71,6 +71,7 @@ class ZoneData:
     known: np.ndarray  # [T, n_known] float32: calendar + weather (rel_pos filled per sample)
     dow: np.ndarray  # [T] int64
     dates: np.ndarray  # [T] datetime64[D] local date of each slot
+    tod: np.ndarray  # [T] int64 wall-clock quarter hour
     scale: float = 1.0
     known_cols: list[str] = field(default_factory=list)
 
@@ -108,8 +109,68 @@ def prepare_zone(
         known=k[cols].to_numpy(dtype=np.float32),
         dow=fields["date"].dt.dayofweek.to_numpy(),
         dates=fields["date"].to_numpy().astype("datetime64[D]"),
+        tod=tod.astype(np.int64),
         known_cols=cols,
     )
+
+
+def aggregate_zone(name: str, members: list[ZoneData], weights: dict[str, float]) -> ZoneData:
+    """A synthetic zone: the sum of `members` (loads add exactly), weather = load-weighted mean.
+
+    Used as extra training series for the global model; never forecast itself.
+    """
+    first = members[0]
+    w = np.array([weights.get(m.zone, 1.0) for m in members], dtype=float)
+    w = w / w.sum()
+    raw = np.zeros(len(first.index))
+    known = first.known.copy()
+    weather_j = [j for j, c in enumerate(first.known_cols) if c in WEATHER_COLS]
+    known[:, weather_j] = 0.0
+    for wi, m in zip(w, members, strict=True):
+        pos = m.index.get_indexer(first.index)
+        raw = raw + np.where(pos >= 0, m.raw[np.clip(pos, 0, None)], np.nan)
+        known[:, weather_j] += wi * np.where(
+            pos[:, None] >= 0, m.known[np.clip(pos, 0, None)][:, weather_j], np.nan
+        )
+    return ZoneData(
+        zone=name,
+        index=first.index,
+        raw=raw,
+        known=known.astype(np.float32),
+        dow=first.dow,
+        dates=first.dates,
+        tod=first.tod,
+        known_cols=list(first.known_cols),
+    )
+
+
+def block_bootstrap(
+    zd: ZoneData, y: np.ndarray, rng: np.random.Generator, block: int = SLOTS_PER_DAY
+) -> np.ndarray:
+    """A bootstrap replica of `y`: trend + (weekday, tod) profile + block-resampled residual.
+
+    Trend = centred 7-day mean; profile = mean of the detrended load per (weekday, tod);
+    the residual is resampled in moving blocks of one day (Bergmeir et al., 2016). The
+    NaN tail beyond the last observation is kept, so the replica obeys the same cutoff.
+    """
+    valid = np.flatnonzero(~np.isnan(y))
+    if len(valid) == 0:
+        return y.copy()
+    n = int(valid.max()) + 1
+    s = pd.Series(y[:n])
+    trend = s.rolling(7 * SLOTS_PER_DAY, center=True, min_periods=SLOTS_PER_DAY).mean()
+    trend = trend.ffill().bfill()
+    detrended = s - trend
+    key = zd.dow[:n] * SLOTS_PER_DAY + zd.tod[:n]
+    profile = detrended.groupby(key).transform("mean")
+    resid = np.nan_to_num((detrended - profile).to_numpy())
+    n_blocks = -(-n // block)
+    starts = rng.integers(0, max(n - block, 0) + 1, n_blocks)
+    boot = np.concatenate([resid[st : st + block] for st in starts])[:n]
+    out = np.full(len(y), np.nan)
+    out[:n] = np.maximum((trend + profile).to_numpy() + boot, 1.0)
+    out[:n][np.isnan(y[:n])] = np.nan
+    return out
 
 
 def series_asof(
@@ -365,9 +426,16 @@ class TFTForecaster:
 
     # --- training ------------------------------------------------------------------
     def fit(
-        self, data: dict[str, tuple[ZoneData, np.ndarray]], targets: list[date]
+        self,
+        data: dict[str, tuple[ZoneData, np.ndarray]],
+        targets: list[date],
+        replicas: list[tuple[ZoneData, np.ndarray]] | None = None,
     ) -> TFTForecaster:
-        """`data`: zone -> (ZoneData, load repaired as of the fit cutoff); `targets`: train days."""
+        """`data`: zone -> (ZoneData, load repaired as of the fit cutoff); `targets`: train days.
+
+        `replicas` are extra (ZoneData, load) series of zones already in `data` (bootstrap
+        copies): training windows only, never validation.
+        """
         torch.manual_seed(self.seed)
         np.random.seed(self.seed)
         first = next(iter(data.values()))[0]
@@ -395,6 +463,13 @@ class TFTForecaster:
                     continue
                 item = _tensors(zd, y, s, self.enc_len, self.wmean, self.wstd)
                 (val_items if t >= val_from else train_items).append(item)
+        for zd, y in replicas or []:
+            for t in targets:
+                if t >= val_from:
+                    continue
+                s = make_sample(zd, self.zone_id[zd.zone], t, self.enc_len)
+                if s is not None:
+                    train_items.append(_tensors(zd, y, s, self.enc_len, self.wmean, self.wstd))
         if not train_items or not val_items:
             raise ValueError("not enough windows to train the TFT")
         model = TFT(

@@ -32,6 +32,23 @@ from src.config import BACKTEST_END, BACKTEST_START, NYCA, ZONES  # noqa: E402
 from src.settlement import slot_prices  # noqa: E402
 
 
+def augment_params(args: argparse.Namespace) -> dict[str, object]:
+    """The parameter set of the chosen augmentation kind (see models/augment.py)."""
+    within = None if args.swap_within == "none" else args.swap_within
+    copies = {"copies": args.aug_copies, "weight": args.aug_weight}
+    table: dict[str, dict[str, object]] = {
+        "swap": {"p": args.swap_p, "within": within, **copies},
+        "wnoise": {
+            "day_sigma": args.noise_day_sigma,
+            "slot_sigma": args.noise_slot_sigma,
+            **copies,
+        },
+        "extreme": {"quantile": args.extreme_quantile, "factor": args.extreme_factor},
+        "cmixup": {"alpha": args.mixup_alpha, "k": args.mixup_k, "within": within, **copies},
+    }
+    return table.get(args.augment, {})
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -70,11 +87,20 @@ def main(argv: list[str] | None = None) -> int:
         "--estimator", choices=["lgbm", "xgb"], default="lgbm", help="boosting library"
     )
     parser.add_argument(
-        "--augment", choices=["swap"], default=None, help="training-row augmentation"
+        "--augment",
+        choices=["swap", "wnoise", "extreme", "cmixup"],
+        default=None,
+        help="training-row augmentation (models/augment.py)",
     )
     parser.add_argument("--swap-p", type=float, default=0.1, help="swap-noise cell probability")
-    parser.add_argument("--swap-copies", type=int, default=1, help="augmented copies per row")
-    parser.add_argument("--swap-weight", type=float, default=0.5, help="weight of a copy")
+    parser.add_argument("--aug-copies", type=int, default=1, help="augmented copies per row")
+    parser.add_argument("--aug-weight", type=float, default=0.5, help="weight of a copy")
+    parser.add_argument("--noise-day-sigma", type=float, default=1.55, help="wnoise: C per day")
+    parser.add_argument("--noise-slot-sigma", type=float, default=1.58, help="wnoise: C per slot")
+    parser.add_argument("--extreme-quantile", type=float, default=0.9, help="extreme: tail")
+    parser.add_argument("--extreme-factor", type=float, default=3.0, help="extreme: weight")
+    parser.add_argument("--mixup-alpha", type=float, default=2.0, help="cmixup: Beta(a, a)")
+    parser.add_argument("--mixup-k", type=int, default=5, help="cmixup: nearest targets")
     parser.add_argument(
         "--swap-within",
         choices=["tod", "none"],
@@ -123,12 +149,7 @@ def main(argv: list[str] | None = None) -> int:
         decay_floor=args.decay_floor,
         estimator=args.estimator,
         augment=args.augment,
-        augment_params={
-            "p": args.swap_p,
-            "copies": args.swap_copies,
-            "weight": args.swap_weight,
-            "within": None if args.swap_within == "none" else args.swap_within,
-        },
+        augment_params=augment_params(args),
         history_start=args.history_start,
         model_overrides={
             "n_estimators": args.n_estimators,
