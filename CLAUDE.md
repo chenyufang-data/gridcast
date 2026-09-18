@@ -67,7 +67,7 @@ lock file, logging, type hints, LICENSE, data provenance, year-proof holidays).
   −0.26 pooled [−0.32, −0.20] (adopted; ≈ 1.55× compute, full run ≈ 100–110 min); XGBoost
   a wash; swap noise null; **TFT −0.94 [−1.09, −0.78], pooled 4.40 vs isolf_pre 4.35,
   ahead of the ISO on MHK VL, 77% raw band, seed-robust**, monthly refits of 84–204 s on
-  the GPU. The 12-zone tables in the README are still the 12-month-data LightGBM run.
+  the GPU (weekly refits: null, −0.04 [−0.13, +0.04]). The 12-zone tables in the README are still the 12-month-data LightGBM run.
   Gotcha: a 12-worker run once died with `BrokenProcessPool` near its end while the
   machine was loaded; re-running the same `--name` resumed from the per-day cache in
   two minutes.

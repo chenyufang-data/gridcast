@@ -97,6 +97,7 @@ days, 95% intervals).
 | `swap24` | + `--augment swap` (p 0.1, one copy at weight 0.5, donors within the same tod) | 3.87 | 3.51 | 7.88 | 5.09 | −0.25; vs `lgbm24` +0.01 [−0.02, +0.03] | 58% | ~45 min |
 | `tft24` | Temporal Fusion Transformer, one global model over the 12 zones, refit monthly | **2.91** | **2.94** | **7.36** | **4.40** | **−0.94 [−1.09, −0.78]**; vs `lgbm24` −0.68 [−0.82, −0.53] | 77% | 30 min on the GPU |
 | `tft24_seed1` | same, seed 1 | 2.93 | 2.92 | 7.41 | 4.42 | −0.92 | 75% | 52 min (GPU shared) |
+| `tft24_w7` | `--refit-days 7` (53 fits) | 2.88 | 2.87 | 7.33 | 4.36 | −0.98; vs `tft24` −0.04 [−0.13, +0.04] | 75% | 2.2 h (GPU shared) |
 | NYISO `isolf_pre` (same days) | fair ISO benchmark | 2.81 | 2.44 | 7.80 | 4.35 | | | |
 | NYISO `isolf_post` (same days) | post-close reference | 2.58 | 2.04 | 7.32 | 3.98 | | | |
 
@@ -123,9 +124,11 @@ Verdicts:
   lead the trees use). 13 fits of 84–204 s on an RTX 5080 (torch 2.11 + cu128); inference
   is instant on a CPU.
 
+- **Weekly refits: null** (−0.04 [−0.13, +0.04] against monthly, four times the fits).
+  Monthly refits are the setting to carry forward.
+
 Not yet done: the full 12-zone runs of `lgbm24` and `tft24` (the headline rules apply to
-those, not to a three-zone table); the weekly-refit TFT (`tft24_w7`, appended below when
-finished); the Phase 3 consequence (the VM would need torch for inference, with the
+those, not to a three-zone table); the Phase 3 consequence (the VM would need torch for inference, with the
 monthly refit on the laptop and the weights shipped as an artifact, or the trees stay the
 served model).
 
@@ -209,6 +212,6 @@ Open items, in the order they are likely to pay off:
 3. Blending model and `isolf_pre` per zone with weights fitted on trailing days.
 4. Band calibration per hour of day rather than one scale per day.
 5. The full 12-zone runs on 24 months of data for both the trees and the TFT (§2c), then
-   the refit cadence of the TFT (weekly vs monthly) and its band per hour of day.
+   the TFT's band per hour of day (weekly refits were a null result).
 6. Two winters of data: the archive now starts 2024-09-01, so the second winter arrives
    with the 2026–27 season; nothing to do until then.
