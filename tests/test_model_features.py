@@ -20,9 +20,10 @@ def _series() -> pd.Series:
 
 def test_daytype_anchors_pick_the_same_day_type() -> None:
     series = _series()
-    # 2025-10-18 is a Saturday: the nearest same-type day <= D-2 is Sunday 10-12 (k=6)
+    # 2025-10-04 is a Saturday in a holiday-free week: the nearest same-type day
+    # at or before D-2 is Sunday 09-28 (k=6); Columbus Day would make 10-13 weekend-type
     rows, cols = M.build_features(
-        series, [pd.Timestamp("2025-10-13")], date(2025, 10, 18), daytype=True
+        series, [pd.Timestamp("2025-09-29")], date(2025, 10, 4), daytype=True
     )
     assert {
         "is_weekend",
@@ -32,15 +33,15 @@ def test_daytype_anchors_pick_the_same_day_type() -> None:
         "level_same_type",
         "shape_same_type",
     } <= set(cols)
-    sat = rows[rows["date"] == pd.Timestamp("2025-10-18")].sort_values("slot")
+    sat = rows[rows["date"] == pd.Timestamp("2025-10-04")].sort_values("slot")
     assert (sat["is_weekend"] == 1).all()
     expected = series.reindex(sat["ts_utc"] - pd.Timedelta(days=6)).to_numpy()
     assert np.allclose(sat["lag_same_type"].to_numpy(), expected)
-    # the second-nearest same-type day is Saturday 10-11 (k=7): lag_same_type2 is the mean
+    # the second-nearest same-type day is Saturday 09-27 (k=7): lag_same_type2 is the mean
     expected2 = series.reindex(sat["ts_utc"] - pd.Timedelta(days=7)).to_numpy()
     assert np.allclose(sat["lag_same_type2"].to_numpy(), (expected + expected2) / 2)
     # a Monday training row anchors on Friday (k=3), not on the weekend
-    mon = rows[rows["date"] == pd.Timestamp("2025-10-13")].sort_values("slot")
+    mon = rows[rows["date"] == pd.Timestamp("2025-09-29")].sort_values("slot")
     assert (mon["is_weekend"] == 0).all()
     assert np.allclose(
         mon["lag_same_type"].to_numpy(),
