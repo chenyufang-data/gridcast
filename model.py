@@ -176,6 +176,7 @@ def build_features(
     predict_target: date | None,
     weather: pd.DataFrame | None = None,
     weather_hourly: pd.DataFrame | None = None,
+    daytype: bool = False,
 ) -> tuple[pd.DataFrame, list[str]]:
     """Feature rows for every slot of the training days and of the prediction day.
 
@@ -232,6 +233,9 @@ def build_features(
     rows["dayofweek"] = rows["date"].dt.dayofweek
     rows["is_holiday"] = is_holiday(rows["date"])
     rows["holiday_tomorrow"] = is_holiday(rows["date"] + pd.Timedelta(days=1))
+    extra_cols: list[str] = []
+    if daytype:
+        extra_cols = _add_daytype_features(rows, long, level)
 
     weather_cols: list[str] = []
     if weather is not None and not weather.empty:
@@ -240,17 +244,60 @@ def build_features(
         weather_cols = list(WEATHER_FEATURES)
     if weather_hourly is not None and not weather_hourly.empty:
         rows["hour_utc"] = rows["ts_utc"].dt.floor("h")
-        wh = weather_hourly[["hour_utc", *WEATHER_HOURLY_FEATURES]].drop_duplicates("hour_utc")
+        hourly_cols = [c for c in weather_hourly.columns if c != "hour_utc"]
+        wh = weather_hourly[["hour_utc", *hourly_cols]].drop_duplicates("hour_utc")
         rows = rows.merge(wh, on="hour_utc", how="left").drop(columns="hour_utc")
-        weather_cols += list(WEATHER_HOURLY_FEATURES)
+        weather_cols += hourly_cols
 
     rows = rows.replace([np.inf, -np.inf], np.nan)
     newest = max(train_dates) if train_dates else rows["date"].max()
     rows[AGE_COL] = (newest - rows["date"]).dt.days.clip(lower=0).astype(float)
-    return rows, feature_columns(weather_cols)
+    return rows, feature_columns(weather_cols, extra_cols)
 
 
-def feature_columns(weather_cols: list[str] | tuple[str, ...] = ()) -> list[str]:
+def _add_daytype_features(rows: pd.DataFrame, long: pd.Series, level: pd.Series) -> list[str]:
+    """Weekend / holiday day-type and the most recent same-type days as lag anchors.
+
+    A holiday counts as a weekend day. ``lag_same_type`` is the same-tod value on the
+    nearest day <= D-2 of the same type, ``lag_same_type2`` the mean of the two nearest,
+    ``level_same_type`` that nearest day's mean MW. Modifies `rows` in place.
+    """
+    weekend = (rows["date"].dt.dayofweek >= 5) | rows["is_holiday"].astype(bool)
+    rows["is_weekend"] = weekend.astype(int)
+    rows["holiday_yesterday"] = is_holiday(rows["date"] - pd.Timedelta(days=1))
+    picks: list[np.ndarray] = []
+    levels: list[np.ndarray] = []
+    for k in range(2, 10):
+        cand = rows["date"] - pd.Timedelta(days=k)
+        cand_weekend = (cand.dt.dayofweek >= 5) | is_holiday(cand).astype(bool)
+        same = (cand_weekend == weekend).to_numpy()
+        vals = _lookup(long, cand, rows["tod"])
+        picks.append(np.where(same, vals, np.nan))
+        levels.append(np.where(same, level.reindex(cand).to_numpy(), np.nan))
+    stack = np.column_stack(picks)
+    lv = np.column_stack(levels)
+    n = len(rows)
+    valid = ~np.isnan(stack)
+    has = valid.any(axis=1)
+    first = np.argmax(valid, axis=1)
+    order = np.where(valid, np.arange(stack.shape[1])[None, :], stack.shape[1])
+    second = np.sort(order, axis=1)[:, 1]
+    second = np.where(second < stack.shape[1], second, first)
+    idx = np.arange(n)
+    nearest, next_nearest = stack[idx, first], stack[idx, second]
+    rows["lag_same_type"] = np.where(has, nearest, np.nan)
+    rows["lag_same_type2"] = np.where(np.isnan(next_nearest), nearest, (nearest + next_nearest) / 2)
+    rows["level_same_type"] = np.where(has, lv[idx, first], np.nan)
+    rows["shape_same_type"] = rows["lag_same_type"] / rows["level_same_type"]
+    return [
+        "is_weekend", "holiday_yesterday", "lag_same_type", "lag_same_type2",
+        "level_same_type", "shape_same_type",
+    ]  # fmt: skip
+
+
+def feature_columns(
+    weather_cols: list[str] | tuple[str, ...] = (), extra_cols: list[str] | tuple[str, ...] = ()
+) -> list[str]:
     return [
         "tod", "dayofweek", "is_holiday", "holiday_tomorrow",
         *ALL_LAGS,
@@ -261,6 +308,7 @@ def feature_columns(weather_cols: list[str] | tuple[str, ...] = ()) -> list[str]
         "trend_2_7", "trend_7_14", "ratio_2_7", "ratio_7_14",
         "shape_2d", "shape_7d", "shape_14d",
         *weather_cols,
+        *extra_cols,
         AGE_COL,
     ]  # fmt: skip
 
@@ -273,8 +321,14 @@ class DecayWeightedLGBMRegressor:
     recent behaviour dominates, older weekly structure is kept.
     """
 
-    def __init__(self, decay_half_life: float = DECAY_HALF_LIFE_DAYS, **lgbm_params: Any) -> None:
+    def __init__(
+        self,
+        decay_half_life: float = DECAY_HALF_LIFE_DAYS,
+        decay_floor: float = 0.0,
+        **lgbm_params: Any,
+    ) -> None:
         self.decay_half_life = decay_half_life
+        self.decay_floor = decay_floor
         self.lgbm_params = lgbm_params
         self.model = LGBMRegressor(**lgbm_params)
 
@@ -286,11 +340,9 @@ class DecayWeightedLGBMRegressor:
 
     def fit(self, X: pd.DataFrame, y: pd.Series | np.ndarray) -> DecayWeightedLGBMRegressor:
         X, age = self._pop_age(X)
-        weight = (
-            0.5 ** (age / self.decay_half_life)
-            if age is not None and self.decay_half_life
-            else None
-        )
+        weight = None
+        if age is not None and self.decay_half_life:
+            weight = np.maximum(0.5 ** (age / self.decay_half_life), self.decay_floor)
         self.model.fit(X, y, sample_weight=weight)
         return self
 
@@ -345,6 +397,7 @@ def forecast_day(
     window_days: int = 120,
     model_overrides: dict[str, Any] | None = None,
     target_mode: str = "mw",
+    daytype: bool = False,
 ) -> pd.DataFrame:
     """Train on `history` (one zone, slots ending at or before the cutoff) and forecast `target`.
 
@@ -372,7 +425,7 @@ def forecast_day(
             f"only {len(targets)} training days before {target}; need {MIN_TRAIN_DAYS}"
         )
 
-    rows, cols = build_features(repaired, targets, target, weather, weather_hourly)
+    rows, cols = build_features(repaired, targets, target, weather, weather_hourly, daytype)
     train = rows[rows["y"].notna() & rows["lag_7d"].notna()]
     pred_rows = (
         rows[rows["date"] == pd.Timestamp(target)].sort_values("slot").reset_index(drop=True)

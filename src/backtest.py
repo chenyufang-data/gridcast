@@ -61,6 +61,11 @@ class BacktestConfig:
     weather_lead: str | None = "d2"  # None = no weather features
     target_mode: str = "mw"  # "mw" (load directly) or "ratio" (y / same-slot 3-week mean)
     hourly_weather: bool = True  # forecast temperature at each hour (temp_h); the sweep winner
+    extra_weather: bool = (
+        False  # apparent temp, dew point, humidity, cloud, wind, radiation per hour
+    )
+    daytype: bool = False  # weekend/holiday type and same-type lag anchors
+    decay_floor: float = 0.0  # minimum sample weight (keeps last year's season in range)
     workers: int = 1
     results_dir: Path = RESULTS_DIR
     model_overrides: dict[str, Any] = field(default_factory=dict)
@@ -92,7 +97,12 @@ def forecast_one(
 ) -> pd.DataFrame:
     """One (zone, day) forecast joined with the actual load; raises on thin history."""
     history = zone_slots[zone_slots["ts_utc"] + SLOT <= cutoff_for(target)]
-    overrides = {"n_jobs": 1, "decay_half_life": cfg.half_life, **cfg.model_overrides}
+    overrides = {
+        "n_jobs": 1,
+        "decay_half_life": cfg.half_life,
+        "decay_floor": cfg.decay_floor,
+        **cfg.model_overrides,
+    }
     out = forecast_day(
         history,
         target,
@@ -103,6 +113,7 @@ def forecast_one(
         window_days=cfg.window_days,
         model_overrides=overrides,
         target_mode=cfg.target_mode,
+        daytype=cfg.daytype,
     )
     out.insert(0, "zone", zone)
     actual = zone_slots[["ts_utc", "load_mw"]].rename(columns={"load_mw": "actual"})
@@ -176,7 +187,9 @@ def run(
             alphas = {}  # NYCA has no zonal price: α = 0.5, no settlement
         hfeats = None
         if cfg.hourly_weather and cfg.weather_lead:
-            hfeats = hourly_features_for(weather_hourly, zone, lead=cfg.weather_lead)
+            hfeats = hourly_features_for(
+                weather_hourly, zone, lead=cfg.weather_lead, extra=cfg.extra_weather
+            )
         for chunk in _chunks(targets):
             tasks.append((cfg, zone, chunk, zone_slots, feats, alphas, hfeats))
     log.info(

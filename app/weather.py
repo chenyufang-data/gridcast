@@ -63,13 +63,24 @@ ZONE_WEIGHT: dict[str, float] = {
     "WEST": 1730,
 }  # fmt: skip
 VARIABLES = {"tfc1": "temperature_2m_previous_day1", "tfc2": "temperature_2m_previous_day2"}
+# extra hourly variables, 2-day lead only (columns x2_<key> in the hourly file)
+EXTRA_VARIABLES = {
+    "app": "apparent_temperature_previous_day2",
+    "dew": "dew_point_2m_previous_day2",
+    "rh": "relative_humidity_2m_previous_day2",
+    "cloud": "cloud_cover_previous_day2",
+    "wind": "wind_speed_10m_previous_day2",
+    "rad": "shortwave_radiation_previous_day2",
+}
 LEADS = {"d1": "tfc1", "d2": "tfc2"}
 
 
 def _frames(hourly: dict[str, list[object]], zone: str) -> tuple[pd.DataFrame, pd.DataFrame]:
     """API payload (UTC stamps) -> (daily aggregates on local ET days, hourly UTC rows)."""
     ts_utc = pd.to_datetime(hourly["time"]).tz_localize("UTC")
-    h = pd.DataFrame({"ts_utc": ts_utc, **{k: hourly[v] for k, v in VARIABLES.items()}})
+    cols = {k: hourly[v] for k, v in VARIABLES.items()}
+    cols.update({f"x2_{k}": hourly[v] for k, v in EXTRA_VARIABLES.items() if v in hourly})
+    h = pd.DataFrame({"ts_utc": ts_utc, **cols})
     h.insert(1, "zone", zone)
     local_day = h["ts_utc"].dt.tz_convert(MARKET_TZ).dt.normalize().dt.tz_localize(None)
     parts = []
@@ -90,7 +101,7 @@ def fetch_zone(
     params: dict[str, str | float] = {
         "latitude": lat,
         "longitude": lon,
-        "hourly": ",".join(VARIABLES.values()),
+        "hourly": ",".join([*VARIABLES.values(), *EXTRA_VARIABLES.values()]),
         "start_date": start.isoformat(),
         "end_date": end.isoformat(),
         "timezone": "UTC",
@@ -104,7 +115,7 @@ def with_nyca(df: pd.DataFrame, key: str = "date") -> pd.DataFrame:
     """Append the load-weighted statewide row per `key` (``date`` or ``ts_utc``)."""
     z = df[df["zone"] != NYCA].copy()
     z["w"] = z["zone"].map(ZONE_WEIGHT)
-    cols = [c for c in z.columns if c.startswith("tfc")]
+    cols = [c for c in z.columns if c.startswith("tfc") or c.startswith("x2_")]
     weighted = z[cols].multiply(z["w"], axis=0)
     weighted[key] = z[key]
     weighted["w"] = z["w"]
@@ -192,13 +203,24 @@ def features_for(weather: pd.DataFrame | None, zone: str, lead: str = "d2") -> p
 
 
 def hourly_features_for(
-    weather_hourly: pd.DataFrame | None, zone: str, lead: str = "d2"
+    weather_hourly: pd.DataFrame | None, zone: str, lead: str = "d2", extra: bool = False
 ) -> pd.DataFrame | None:
-    """Hour-level feature for `zone`: ``hour_utc, temp_h`` (forecast °C valid at that hour)."""
+    """Hour-level features for `zone`: ``hour_utc, temp_h`` and, with `extra`, the 2-day-lead
+    apparent temperature, dew point, humidity, cloud cover, wind, radiation (``*_h``) plus
+    ``temp_h_prev3`` (mean forecast temperature over the three preceding hours).
+    """
     if weather_hourly is None or weather_hourly.empty:
         return None
     z = weather_hourly[weather_hourly["zone"] == zone]
     if z.empty:
         return None
     out = pd.DataFrame({"hour_utc": z["ts_utc"].dt.floor("h"), "temp_h": z[LEADS[lead]].to_numpy()})
-    return out.drop_duplicates("hour_utc").sort_values("hour_utc").reset_index(drop=True)
+    out = out.drop_duplicates("hour_utc").sort_values("hour_utc").reset_index(drop=True)
+    if extra:
+        zz = z.drop_duplicates("ts_utc").sort_values("ts_utc")
+        for key in EXTRA_VARIABLES:
+            col = f"x2_{key}"
+            if col in zz.columns:
+                out[f"{key}_h"] = zz[col].to_numpy()
+        out["temp_h_prev3"] = out["temp_h"].shift(1).rolling(3, min_periods=1).mean()
+    return out
