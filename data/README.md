@@ -73,8 +73,10 @@ data/
   cache/<dir>/…      raw daily CSVs and monthly zips, mirroring the archive paths;
                      `<zip>.partial` = the current month's zip (refreshed when a
                      requested day is missing); days >= today are never cached
+  processed/*.pkl    normalized tables for offline work (scripts/backfill.py)
   app.db             SQLite (APP_DB_PATH)
-  weather.csv        Open-Meteo cache (WEATHER_PATH)
+  weather.csv        Open-Meteo day-ahead forecasts per zone, daily (WEATHER_PATH)
+  weather_hourly.csv the same per hour (WEATHER_HOURLY_PATH); scripts/fetch_weather.py
 ```
 
 Canonical frames produced by the normalizers (all timestamps tz-aware UTC):

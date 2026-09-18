@@ -22,8 +22,16 @@ data/processed/
 *.db-wal
 *.db-shm
 
-# regeneratable backtest outputs
-results/
+# regeneratable backtest outputs: per-day caches and slot-level results stay out;
+# the small summary tables behind README numbers are committed
+results/*
+!results/default/
+results/default/*
+!results/default/summary.csv
+!results/default/baselines_summary.csv
+!results/default/imbalance_pooled.csv
+!results/default/imbalance_by_zone.csv
+!results/default/calibration.csv
 *.png
 
 # editors / tooling

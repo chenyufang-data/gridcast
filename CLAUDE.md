@@ -26,14 +26,33 @@ lock file, logging, type hints, LICENSE, data provenance, year-proof holidays).
   frames, `resample_slots` (time-weighted 15-min grid with `coverage`), `add_nyca`;
   `tests/test_nyiso.py` (20 offline cases against the synthetic truth frames + one
   `-m live` round trip, which passed against the real archive on 2026-09-17).
-- **Next action: Phase 2** — model port (`model.py`) with the cutoff timestamp
-  (D−1 05:00 ET), DST-aware slot grid from `resample_slots`, `holidays` lib,
-  features per `docs/plan.md` §3; `src/backtest.py` + `scripts/run_backtest.py`
-  (per-zone, parallel, per-day cache under `results/`); baselines incl. **two isolf
-  benchmarks** (D−1-named file = pre-close, D-named file = post-close, see
-  `data/README.md`); α estimation; `imbalance_report.py`; calibration/conformal;
-  experiment log. Backfill 2025-06-01 → today first via `ArchiveClient.frame`
-  (monthly zips; ~15 months × 5 types).
+- **Phase 2 (model + backtest) is done.** `model.py` (cutoff guard, wall-clock lag
+  alignment, repair, features, decay-weighted LightGBM, `forecast_day`),
+  `app/weather.py` (Open-Meteo previous-runs, daily + hourly, leakage-free `d2` lead),
+  `src/dataset.py`, `src/settlement.py` (slot prices, newsvendor α, imbalance $),
+  `src/baselines.py` (persistence family, `isolf_pre` / `isolf_post`),
+  `src/backtest.py` (per-(zone, month) process pool, per-day CSV cache), `src/metrics.py`,
+  scripts `backfill`, `fetch_weather`, `run_backtest`, `skill_baselines`,
+  `imbalance_report`, `quantile_calibration`. 63 offline tests. Data lives in
+  `data/processed/*.pkl`, `data/weather*.csv`, per-day results under `results/<name>/`
+  (all gitignored except the small summary tables of `results/default/`).
+  **Findings (numbers in `docs/experiments.md` and the README results section):**
+  NYISO's pre-close forecast beats the model on hourly MAPE (pooled 4.85 vs 6.61;
+  NYCA 2.81 vs 4.95; NORTH is the only zone the model wins), so MAPE is not the headline; weather is worth ~1.5 points and
+  hourly `temp_h` another 0.2; the ratio target is a negative result; in signed dollars
+  no bidding strategy is distinguishable over one year (bootstrap CIs ± tens of $M), so
+  the α-bid is secondary by rule; raw quantile bands cover 45%, conformal rescaling
+  77%. Sweep-chosen defaults: window 120, half-life 32, MW target, daily + hourly
+  weather, 600 trees @ lr 0.02.
+- **Next action: Phase 3** — backend port: `app/db.py` (zones, load/price tables,
+  forecasts + values, `schedules`, `forecast_scores` with `imbalance_usd` / `da_cost_usd`,
+  alerts), `app/service.py` (ingest via `ArchiveClient` + `resample_slots`, train-on-demand
+  via `model.forecast_day` with the conformal band scaling and the α-bid, versioning hash
+  incl. `FEATURE_VERSION`, scoring in MAPE and $, α estimation from `src.settlement`),
+  `app/main.py` (`X-Admin-Token` middleware on POST/PATCH/DELETE, per-IP rate limit,
+  endpoints for zones/forecasts/schedules/scores/prices/isolf), scheduler (04:30 ET
+  forecast + α-bid for tomorrow, 06:30 ET fetch yesterday + score), `deploy/seed.py`
+  (backfill from cache), tests (service e2e with real training on synthetic data).
 - GitHub: `origin` = https://github.com/chenyufang-data/gridcast (private), `main`
   pushed and tracking. CI status must be checked on the web (no `gh`).
 - Folder swap is done: this repo is `Documents/gridcast`, the source is

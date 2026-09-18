@@ -59,6 +59,7 @@ def main(argv: list[str] | None = None) -> int:
     cols = ["pred", *ALL]
     hourly = to_hourly(merged, [*cols, "actual"], keys=["zone"])
     table = score_table(hourly, cols).rename(columns={"pred": "model"})
+    table.to_csv(RESULTS_DIR / args.name / "baselines_summary.csv", index=False)
     print(
         f"hourly MAPE (%), {results['date'].min().date()} .. {results['date'].max().date()}, data as of D-1 05:00 ET\n"
     )

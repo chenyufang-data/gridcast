@@ -53,8 +53,81 @@ Observations that shaped the default:
 
 ## 3. Full run (11 zones + NYCA)
 
-_Filled in from `results/default/`._
+`scripts/run_backtest.py --name default --workers 14` (1998 s wall on a 16-thread laptop),
+then `skill_baselines.py`, `imbalance_report.py`, `quantile_calibration.py` with
+`--name default`. Committed tables: `results/default/summary.csv`,
+`baselines_summary.csv`, `imbalance_pooled.csv`, `imbalance_by_zone.csv`, `calibration.csv`.
+
+### 3.1 Accuracy (hourly MAPE, %) and band coverage (15-min, nominal 80%)
+
+| Zone | Model | persist D−2 | persist D−7 | mean(D−7, D−14) | isolf_pre | isolf_post | P10–P90 raw | conformal |
+|---|---|---|---|---|---|---|---|---|
+| CAPITL | 7.67 | 11.41 | 12.23 | 11.08 | 5.33 | 5.09 | 47% | 78% |
+| CENTRL | 7.51 | 11.10 | 11.83 | 10.65 | 6.32 | 6.15 | 44% | 78% |
+| DUNWOD | 5.49 | 10.09 | 10.59 | 10.07 | 3.75 | 3.40 | 45% | 77% |
+| GENESE | 6.88 | 11.02 | 11.07 | 10.17 | 4.69 | 4.31 | 47% | 78% |
+| HUD VL | 7.65 | 12.33 | 13.88 | 12.71 | 6.20 | 5.30 | 47% | 77% |
+| LONGIL | 7.19 | 11.02 | 11.60 | 10.97 | 4.05 | 3.60 | 44% | 76% |
+| MHK VL | 10.11 | 14.32 | 15.29 | 13.86 | 7.80 | 7.32 | 46% | 78% |
+| MILLWD | 7.67 | 12.60 | 14.43 | 13.57 | 5.97 | 5.41 | 43% | 77% |
+| N.Y.C. | 4.44 | 9.29 | 8.68 | 8.52 | 2.44 | 2.04 | 41% | 77% |
+| NORTH | 4.70 | 5.85 | 6.93 | 6.24 | 5.39 | 4.37 | 50% | 78% |
+| NYCA | 4.95 | 8.76 | 9.11 | 8.50 | 2.81 | 2.58 | 43% | 77% |
+| WEST | 5.12 | 8.14 | 7.92 | 7.40 | 3.42 | 2.93 | 43% | 76% |
+| pooled | 6.61 | 10.49 | 11.13 | 10.31 | 4.85 | 4.38 | 45% | 77% |
+
+- The model beats the best naive baseline in every zone (pooled −36% relative error).
+- NYISO's pre-close forecast is better in every zone but NORTH (5.39 vs 4.70), where
+  the ISO's own forecast is unusually weak; post-close the ISO wins everywhere.
+- Small zones with lumpy industrial load (MHK VL, MILLWD, CAPITL, HUD VL) are the hard
+  ones for both; one temperature series per zone is too little there.
+- Raw quantile trees cover 45% of actuals; the trailing-30-day conformal rescaling
+  reaches 77% (target 80%) with 12% below / 11% above, at twice the raw width.
+
+### 3.2 Settlement in dollars (11 priced zones, hourly bids settled per 15-min slot)
+
+| Strategy | Signed $ vs perfect foresight | 95% bootstrap CI | Σ \|dev × spread\| | $/MWh (signed) |
+|---|---|---|---|---|
+| `persist_2d` | $86M | [$31M, $143M] | $335M | 0.568 |
+| `persist_7d` | $26M | [$-63M, $118M] | $432M | 0.175 |
+| `mean_7_14` | $21M | [$-94M, $128M] | $446M | 0.141 |
+| `isolf_pre` | $34M | [$8M, $60M] | $158M | 0.226 |
+| `isolf_post` | $26M | [$-2M, $53M] | $148M | 0.171 |
+| `isolf_pre_alpha` | $55M | [$35M, $77M] | $143M | 0.363 |
+| `model` | $55M | [$22M, $90M] | $218M | 0.363 |
+| `model_alpha_bid` | $55M | [$21M, $92M] | $220M | 0.367 |
+| `model_alpha_emp` | $60M | [$22M, $102M] | $233M | 0.400 |
+
+- α (newsvendor ratio of the trailing 30-day spread) averages 0.41–0.48 by zone:
+  real-time prices sit below day-ahead about 61% of the time, so the cost-aware bid is
+  slightly *short* of the median.
+- The signed totals are noise: every interval overlaps every other, and a naive
+  strategy with 2.5× the model's dollars at risk shows the smallest signed total by
+  luck. **The α-bid therefore does not meet the headline rule** (docs/plan.md §4) and
+  stays a secondary feature of the product.
+- Σ |dev × spread| (dollars at risk) follows accuracy: ISO $158M <
+  model $218M < naive ≥ $335M.
 
 ## 4. Negative results and open items
 
-_Filled in after the runs._
+Negative or null results (kept so nobody repeats them):
+
+- Ratio target (`y / same-slot 3-week mean`): +0.6–0.7 points worse in both windows.
+- 300 trees @ lr 0.04: 2× faster, +0.05 worse; not worth it for a nightly job either.
+- Optimistic weather lead (`previous_day1`): +0.13 better but partly post-cutoff; unused.
+- Half-life 64 vs 32 with the 120-day window: a wash.
+- α-bid via quantile LightGBM: the under-dispersed quantiles move the bid by ~40 MW on a
+  6,000 MW zone, and the empirical-ratio variant (which does move it) costs more, not less.
+- Signed imbalance dollars over 12 months cannot rank strategies (see §3.2).
+
+Open items, in the order they are likely to pay off:
+
+1. More weather per zone: humidity / dew point and cloud cover at each hour, and a
+   second station for the large zones; the small upstate zones need it most.
+2. A one-year training window with stronger decay, so summer peaks are in range when
+   the first heat wave arrives (the 120-day window still misses the first hot days).
+3. The ISO forecast as a feature is excluded by decision (docs/plan.md Q8). A labelled
+   experiment would almost certainly close most of the gap; it should stay a separate,
+   clearly named variant if ever run.
+4. Blending model and `isolf_pre` per zone with weights fitted on trailing days.
+5. Band calibration per hour of day rather than one scale per day.

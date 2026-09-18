@@ -26,7 +26,25 @@ NYISO forecast file named for day D is posted on D−1 between 07:10 and 08:00 E
 the bid close. `isolf_pre` (file named D−1) is what a bidder had at the cutoff;
 `isolf_post` (file named D) is the stronger post-close reference.
 
-_RESULTS_TABLE_
+Hourly MAPE (%), lower is better; `scripts/skill_baselines.py --name default`:
+
+| Zone | Model | Best naive | NYISO pre-close (fair) | NYISO post-close |
+|---|---|---|---|---|
+| CAPITL | 7.67 | 11.08 | 5.33 | 5.09 |
+| CENTRL | 7.51 | 10.65 | 6.32 | 6.15 |
+| DUNWOD | 5.49 | 10.07 | 3.75 | 3.40 |
+| GENESE | 6.88 | 10.17 | 4.69 | 4.31 |
+| HUD VL | 7.65 | 12.33 | 6.20 | 5.30 |
+| LONGIL | 7.19 | 10.97 | 4.05 | 3.60 |
+| MHK VL | 10.11 | 13.86 | 7.80 | 7.32 |
+| MILLWD | 7.67 | 12.60 | 5.97 | 5.41 |
+| N.Y.C. | 4.44 | 8.52 | 2.44 | 2.04 |
+| NORTH | 4.70 | 5.85 | 5.39 | 4.37 |
+| NYCA | 4.95 | 8.50 | 2.81 | 2.58 |
+| WEST | 5.12 | 7.40 | 3.42 | 2.93 |
+| **pooled (11 zones + NYCA)** | **6.61** | **10.31** | **4.85** | **4.38** |
+
+Dollars at risk over the year, Σ |deviation × (RT − DA)| across the 11 priced zones (`scripts/imbalance_report.py --name default`): NYISO pre-close $158M, model $218M, best naive $335M. Signed totals against perfect foresight range from $21M to $86M with 95% bootstrap intervals about ±$35M wide, so they do not rank strategies.
 
 What the table says, under the reporting rules in the plan:
 
@@ -40,8 +58,8 @@ What the table says, under the reporting rules in the plan:
   because real-time price spikes dominate the sum. The dollars *at risk*
   (Σ |deviation × spread|) do track accuracy, which is the number a desk can act on.
 - **What is measured and true:** a leakage-honest day-ahead protocol on public data,
-  P10–P90 bands that reach _CONF_COVERAGE_% coverage after a trailing conformal
-  rescaling (raw quantile trees: _RAW_COVERAGE_%), and a settlement layer that prices
+  P10–P90 bands that reach 77% coverage after a trailing conformal
+  rescaling (raw quantile trees: 45%), and a settlement layer that prices
   every forecast the way the market does.
 
 ## Data
@@ -54,15 +72,16 @@ project. Details, verified file layouts, and the DST gotchas: [data/README.md](d
 ## Layout
 
 ```
-model.py        modeling core shared by src/ and app/ (Phase 2)
-src/            constants (src/config.py), offline backtest harness (Phase 2)
-app/            FastAPI service: logging, health; zones/forecasts/schedules (Phase 3)
+model.py        modeling core shared by src/ and app/: cutoff guard, features, LightGBM
+src/            constants, dataset builder, backtest engine, settlement, baselines, metrics
+app/            NYISO archive client, weather provider, logging, FastAPI (service: Phase 3)
 frontend/       Streamlit UI, HTTP client of the API only (Phase 4)
-scripts/        one-command reports behind every headline number (Phase 2)
+scripts/        one-command data pulls and reports behind every headline number
 tests/          offline suite; tests/synthetic.py = NYISO-shaped synthetic archive
 deploy/         Caddyfile, GCE runbook and seed script (Phase 5)
 data/           README only; fetched data is cached here and gitignored
-docs/           plan, conventions, demo runbook
+docs/           plan, experiment log, conventions
+results/        per-run backtest outputs (gitignored except the default run's summaries)
 ```
 
 ## Quickstart

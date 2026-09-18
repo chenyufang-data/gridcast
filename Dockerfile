@@ -20,6 +20,7 @@ COPY app/ app/
 ENV APP_DB_PATH=/data/app.db
 ENV NYISO_CACHE_DIR=/data/cache
 ENV WEATHER_PATH=/data/weather.csv
+ENV WEATHER_HOURLY_PATH=/data/weather_hourly.csv
 VOLUME /data
 
 EXPOSE 8000

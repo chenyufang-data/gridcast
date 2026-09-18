@@ -19,7 +19,7 @@ Typical sequence:
 ```powershell
 .\.venv\Scripts\python.exe scripts\backfill.py
 .\.venv\Scripts\python.exe scripts\fetch_weather.py
-.\.venv\Scripts\python.exe scripts\run_backtest.py --name default            # ~30 min on 12 cores
+.\.venv\Scripts\python.exe scripts\run_backtest.py --name default            # ~35 min with 14 workers
 .\.venv\Scripts\python.exe scripts\skill_baselines.py --name default
 .\.venv\Scripts\python.exe scripts\imbalance_report.py --name default
 .\.venv\Scripts\python.exe scripts\quantile_calibration.py --name default
