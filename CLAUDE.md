@@ -37,13 +37,20 @@ lock file, logging, type hints, LICENSE, data provenance, year-proof holidays).
   `data/processed/*.pkl`, `data/weather*.csv`, per-day results under `results/<name>/`
   (all gitignored except the small summary tables of `results/default/`).
   **Findings (numbers in `docs/experiments.md` and the README results section):**
-  NYISO's pre-close forecast beats the model on hourly MAPE (pooled 4.85 vs 6.61;
-  NYCA 2.81 vs 4.95; NORTH is the only zone the model wins), so MAPE is not the headline; weather is worth ~1.5 points and
-  hourly `temp_h` another 0.2; the ratio target is a negative result; in signed dollars
-  no bidding strategy is distinguishable over one year (bootstrap CIs ± tens of $M), so
-  the α-bid is secondary by rule; raw quantile bands cover 45%, conformal rescaling
-  77%. Sweep-chosen defaults: window 120, half-life 32, MW target, daily + hourly
-  weather, 600 trees @ lr 0.02.
+  NYISO's pre-close forecast still beats the model on hourly MAPE (pooled 4.85 vs 5.56;
+  NYCA 2.81 vs 4.03; the model wins CENTRL and NORTH), so MAPE is not the headline;
+  in signed dollars no bidding strategy is distinguishable over one year (bootstrap CIs
+  ± tens of $M), so the α-bid is secondary by rule; raw quantile bands cover 52%,
+  conformal rescaling 77%. Two sweeps (§2, §2b of the experiment log): weather ~1.5
+  points, hourly temperature 0.2, extra hourly weather (apparent temp, dew point,
+  humidity, cloud, wind, radiation) another ~1.5 on the hard half-year, a 365-day window
+  ~0.5; ratio target, day-type features, bigger trees and the post-cutoff weather lead
+  are negative/null results. **Current defaults: window 365, half-life 90, MW target,
+  daily + hourly + extra weather at the leakage-free `d2` lead, 600 trees @ lr 0.02**
+  (`BacktestConfig`); the first full run (120 d, temperature only) is archived as
+  `results/v1_w120`. `scripts/compare_runs.py` scores experiments against a base run on
+  identical zone-days; the per-day cache is keyed by run name only, so every new
+  configuration needs a new `--name`. A full 12-zone run takes ~72 min on 14 workers.
 - **Next action: Phase 3** — backend port: `app/db.py` (zones, load/price tables,
   forecasts + values, `schedules`, `forecast_scores` with `imbalance_usd` / `da_cost_usd`,
   alerts), `app/service.py` (ingest via `ArchiveClient` + `resample_slots`, train-on-demand

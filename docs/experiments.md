@@ -8,7 +8,7 @@ which NYISO's hourly `isolf` can be compared fairly. Negative results are kept o
 purpose; nothing here was tuned on the test range beyond the sweep listed in §2.
 
 Data: NYISO public MIS archive (mis.nyiso.com/public/csv), fetched at runtime and not
-redistributed; Open-Meteo previous-runs forecasts for temperature.
+redistributed; Open-Meteo previous-runs forecasts for weather.
 
 ## 1. Fixed protocol
 
@@ -16,8 +16,8 @@ redistributed; Open-Meteo previous-runs forecasts for temperature.
 |---|---|
 | Cutoff | D−1 05:00 ET; `model.forecast_day` raises on any slot ending later |
 | Target | 15-min mean MW per zone (96 slots; 92 / 100 on DST days), hourly means for bidding and scoring |
-| Training window | `[D−1−W, D−2]` with W = 120 days, decay weight `0.5^(age/32 d)` |
-| Features | same-tod lags 2/3/7/14/21 d and their daily levels; D−1 00:00–04:45 morning level and its ratios to D−2 / D−8 mornings; weekly aggregates, trends, shapes; weekday, US federal holiday (+ holiday tomorrow); temperature forecast per day (mean/min/max, deviation from the trailing 7 forecast days ending D−2) and per hour (`temp_h`) |
+| Training window | `[D−1−W, D−2]` with W = 365 days, decay weight `0.5^(age/90 d)` (first full run: 120 d / 32 d) |
+| Features | same-tod lags 2/3/7/14/21 d and their daily levels; D−1 00:00–04:45 morning level and its ratios to D−2 / D−8 mornings; weekly aggregates, trends, shapes; weekday, US federal holiday (+ holiday tomorrow); temperature forecast per day (mean/min/max, deviation from the trailing 7 forecast days ending D−2) and per hour (`temp_h`, apparent temperature, dew point, humidity, cloud cover, wind, shortwave radiation, 3-h temperature mean) |
 | Weather lead | `previous_day2` (issued on D−2 for every hour of D, before the cutoff). `previous_day1` is issued after the cutoff for hours past 05:00 ET and is only run as a labelled optimistic experiment |
 | Model | LightGBM MAE objective, 600 trees, lr 0.02, 31 leaves, depth 5, subsample 0.7, colsample 0.6; quantile objective at 0.1 / 0.9 for the band and at α for the bid |
 | α | newsvendor ratio `c_under / (c_under + c_over)` of the trailing 30-day RT−DA spread per zone, slots ending at or before the cutoff |
@@ -79,36 +79,34 @@ the leakage-free lead, 600 trees @ lr 0.02, no day-type features** (`--daytype` 
 
 ## 3. Full run (11 zones + NYCA)
 
-`scripts/run_backtest.py --name default --workers 14` (1998 s wall on a 16-thread laptop),
-then `skill_baselines.py`, `imbalance_report.py`, `quantile_calibration.py` with
-`--name default`. Committed tables: `results/default/summary.csv`,
-`baselines_summary.csv`, `imbalance_pooled.csv`, `imbalance_by_zone.csv`, `calibration.csv`.
+`scripts/run_backtest.py --name default --workers 14`, then `skill_baselines.py`,
+`imbalance_report.py`, `quantile_calibration.py` with `--name default`. Committed tables:
+`results/default/summary.csv`, `baselines_summary.csv`, `imbalance_pooled.csv`,
+`imbalance_by_zone.csv`, `calibration.csv`.
 
 ### 3.1 Accuracy (hourly MAPE, %) and band coverage (15-min, nominal 80%)
 
 | Zone | Model | persist D−2 | persist D−7 | mean(D−7, D−14) | isolf_pre | isolf_post | P10–P90 raw | conformal |
 |---|---|---|---|---|---|---|---|---|
-| CAPITL | 7.67 | 11.41 | 12.23 | 11.08 | 5.33 | 5.09 | 47% | 78% |
-| CENTRL | 7.51 | 11.10 | 11.83 | 10.65 | 6.32 | 6.15 | 44% | 78% |
-| DUNWOD | 5.49 | 10.09 | 10.59 | 10.07 | 3.75 | 3.40 | 45% | 77% |
-| GENESE | 6.88 | 11.02 | 11.07 | 10.17 | 4.69 | 4.31 | 47% | 78% |
-| HUD VL | 7.65 | 12.33 | 13.88 | 12.71 | 6.20 | 5.30 | 47% | 77% |
-| LONGIL | 7.19 | 11.02 | 11.60 | 10.97 | 4.05 | 3.60 | 44% | 76% |
-| MHK VL | 10.11 | 14.32 | 15.29 | 13.86 | 7.80 | 7.32 | 46% | 78% |
-| MILLWD | 7.67 | 12.60 | 14.43 | 13.57 | 5.97 | 5.41 | 43% | 77% |
-| N.Y.C. | 4.44 | 9.29 | 8.68 | 8.52 | 2.44 | 2.04 | 41% | 77% |
-| NORTH | 4.70 | 5.85 | 6.93 | 6.24 | 5.39 | 4.37 | 50% | 78% |
-| NYCA | 4.95 | 8.76 | 9.11 | 8.50 | 2.81 | 2.58 | 43% | 77% |
-| WEST | 5.12 | 8.14 | 7.92 | 7.40 | 3.42 | 2.93 | 43% | 76% |
-| pooled | 6.61 | 10.49 | 11.13 | 10.31 | 4.85 | 4.38 | 45% | 77% |
+| CAPITL | 6.35 | 11.41 | 12.23 | 11.08 | 5.33 | 5.09 | 52% | 78% |
+| CENTRL | 6.06 | 11.10 | 11.83 | 10.65 | 6.32 | 6.15 | 53% | 77% |
+| DUNWOD | 4.72 | 10.09 | 10.59 | 10.07 | 3.75 | 3.40 | 52% | 78% |
+| GENESE | 5.59 | 11.02 | 11.07 | 10.17 | 4.69 | 4.31 | 53% | 78% |
+| HUD VL | 6.38 | 12.33 | 13.88 | 12.71 | 6.20 | 5.30 | 53% | 78% |
+| LONGIL | 5.78 | 11.02 | 11.60 | 10.97 | 4.05 | 3.60 | 51% | 77% |
+| MHK VL | 8.19 | 14.32 | 15.29 | 13.86 | 7.80 | 7.32 | 54% | 78% |
+| MILLWD | 6.99 | 12.60 | 14.43 | 13.57 | 5.97 | 5.41 | 50% | 77% |
+| N.Y.C. | 3.80 | 9.29 | 8.68 | 8.52 | 2.44 | 2.04 | 51% | 78% |
+| NORTH | 4.43 | 5.85 | 6.93 | 6.24 | 5.39 | 4.37 | 55% | 78% |
+| NYCA | 4.03 | 8.76 | 9.11 | 8.50 | 2.81 | 2.58 | 50% | 77% |
+| WEST | 4.39 | 8.14 | 7.92 | 7.40 | 3.42 | 2.93 | 50% | 76% |
+| pooled | 5.56 | 10.49 | 11.13 | 10.31 | 4.85 | 4.38 | 52% | 77% |
 
-- The model beats the best naive baseline in every zone (pooled −36% relative error).
-- NYISO's pre-close forecast is better in every zone but NORTH (5.39 vs 4.70), where
-  the ISO's own forecast is unusually weak; post-close the ISO wins everywhere.
-- Small zones with lumpy industrial load (MHK VL, MILLWD, CAPITL, HUD VL) are the hard
-  ones for both; one temperature series per zone is too little there.
-- Raw quantile trees cover 45% of actuals; the trailing-30-day conformal rescaling
-  reaches 77% (target 80%) with 12% below / 11% above, at twice the raw width.
+- The model beats the best naive baseline in every zone (pooled −46% relative error).
+- NYISO's pre-close forecast is better in every zone except CENTRL, NORTH; post-close the model still wins CENTRL.
+- Against the first full run (120-day window, temperature only; `results/v1_w120`), pooled hourly MAPE moved from 6.61 to 5.56; the hard upstate zones gained most (MHK VL 10.11 → 8.19).
+- Raw quantile trees cover 52% of actuals; the trailing-30-day conformal rescaling
+  reaches 77% (target 80%) with 12% below / 11% above.
 
 ### 3.2 Settlement in dollars (11 priced zones, hourly bids settled per 15-min slot)
 
@@ -120,40 +118,40 @@ then `skill_baselines.py`, `imbalance_report.py`, `quantile_calibration.py` with
 | `isolf_pre` | $34M | [$8M, $60M] | $158M | 0.226 |
 | `isolf_post` | $26M | [$-2M, $53M] | $148M | 0.171 |
 | `isolf_pre_alpha` | $55M | [$35M, $77M] | $143M | 0.363 |
-| `model` | $55M | [$22M, $90M] | $218M | 0.363 |
-| `model_alpha_bid` | $55M | [$21M, $92M] | $220M | 0.367 |
-| `model_alpha_emp` | $60M | [$22M, $102M] | $233M | 0.400 |
+| `model` | $46M | [$19M, $74M] | $184M | 0.302 |
+| `model_alpha_bid` | $46M | [$18M, $76M] | $186M | 0.307 |
+| `model_alpha_emp` | $50M | [$18M, $81M] | $190M | 0.328 |
 
 - α (newsvendor ratio of the trailing 30-day spread) averages 0.41–0.48 by zone:
-  real-time prices sit below day-ahead about 61% of the time, so the cost-aware bid is
+  real-time prices sit below day-ahead most of the time, so the cost-aware bid is
   slightly *short* of the median.
-- The signed totals are noise: every interval overlaps every other, and a naive
-  strategy with 2.5× the model's dollars at risk shows the smallest signed total by
-  luck. **The α-bid therefore does not meet the headline rule** (docs/plan.md §4) and
-  stays a secondary feature of the product.
+- The signed totals are noise: every interval overlaps every other. **The α-bid does not
+  meet the headline rule** (docs/plan.md §4) and stays a secondary feature of the product.
 - Σ |dev × spread| (dollars at risk) follows accuracy: ISO $158M <
-  model $218M < naive ≥ $335M.
+  model $184M < naive ≥ $335M.
 
 ## 4. Negative results and open items
 
 Negative or null results (kept so nobody repeats them):
 
 - Ratio target (`y / same-slot 3-week mean`): +0.6–0.7 points worse in both windows.
-- 300 trees @ lr 0.04: 2× faster, +0.05 worse; not worth it for a nightly job either.
+- 300 trees @ lr 0.04: 2× faster, +0.05 worse.
 - Optimistic weather lead (`previous_day1`): +0.13 better but partly post-cutoff; unused.
 - Half-life 64 vs 32 with the 120-day window: a wash.
+- Day-type features (weekend/holiday type, same-type lag anchors): null on their own.
+- Bigger trees (63 leaves, 900 trees): +0.07 for 1.5× compute.
 - α-bid via quantile LightGBM: the under-dispersed quantiles move the bid by ~40 MW on a
   6,000 MW zone, and the empirical-ratio variant (which does move it) costs more, not less.
 - Signed imbalance dollars over 12 months cannot rank strategies (see §3.2).
 
 Open items, in the order they are likely to pay off:
 
-1. More weather per zone: humidity / dew point and cloud cover at each hour, and a
-   second station for the large zones; the small upstate zones need it most.
-2. A one-year training window with stronger decay, so summer peaks are in range when
-   the first heat wave arrives (the 120-day window still misses the first hot days).
-3. The ISO forecast as a feature is excluded by decision (docs/plan.md Q8). A labelled
+1. A second weather station for the large zones, and zone-specific variables for the
+   small upstate zones with industrial load (MHK VL, MILLWD).
+2. The ISO forecast as a feature is excluded by decision (docs/plan.md Q8). A labelled
    experiment would almost certainly close most of the gap; it should stay a separate,
    clearly named variant if ever run.
-4. Blending model and `isolf_pre` per zone with weights fitted on trailing days.
-5. Band calibration per hour of day rather than one scale per day.
+3. Blending model and `isolf_pre` per zone with weights fitted on trailing days.
+4. Band calibration per hour of day rather than one scale per day.
+5. Two winters of data once the archive backfill reaches back to 2024 (the plan's Q2
+   option), so both DST transitions and every holiday are seen twice.

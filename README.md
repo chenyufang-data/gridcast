@@ -28,30 +28,31 @@ the bid close. `isolf_pre` (file named D−1) is what a bidder had at the cutoff
 
 Hourly MAPE (%), lower is better; `scripts/skill_baselines.py --name default`:
 
-| Zone | Model | Best naive | NYISO pre-close (fair) | NYISO post-close |
-|---|---|---|---|---|
-| CAPITL | 7.67 | 11.08 | 5.33 | 5.09 |
-| CENTRL | 7.51 | 10.65 | 6.32 | 6.15 |
-| DUNWOD | 5.49 | 10.07 | 3.75 | 3.40 |
-| GENESE | 6.88 | 10.17 | 4.69 | 4.31 |
-| HUD VL | 7.65 | 12.33 | 6.20 | 5.30 |
-| LONGIL | 7.19 | 10.97 | 4.05 | 3.60 |
-| MHK VL | 10.11 | 13.86 | 7.80 | 7.32 |
-| MILLWD | 7.67 | 12.60 | 5.97 | 5.41 |
-| N.Y.C. | 4.44 | 8.52 | 2.44 | 2.04 |
-| NORTH | 4.70 | 5.85 | 5.39 | 4.37 |
-| NYCA | 4.95 | 8.50 | 2.81 | 2.58 |
-| WEST | 5.12 | 7.40 | 3.42 | 2.93 |
-| **pooled (11 zones + NYCA)** | **6.61** | **10.31** | **4.85** | **4.38** |
+| Zone | Model | First full run (120 d, temperature only) | Best naive | NYISO pre-close (fair) | NYISO post-close |
+|---|---|---|---|---|---|
+| CAPITL | 6.35 | 7.67 | 11.08 | 5.33 | 5.09 |
+| CENTRL | 6.06 | 7.51 | 10.65 | 6.32 | 6.15 |
+| DUNWOD | 4.72 | 5.49 | 10.07 | 3.75 | 3.40 |
+| GENESE | 5.59 | 6.88 | 10.17 | 4.69 | 4.31 |
+| HUD VL | 6.38 | 7.65 | 12.33 | 6.20 | 5.30 |
+| LONGIL | 5.78 | 7.19 | 10.97 | 4.05 | 3.60 |
+| MHK VL | 8.19 | 10.11 | 13.86 | 7.80 | 7.32 |
+| MILLWD | 6.99 | 7.67 | 12.60 | 5.97 | 5.41 |
+| N.Y.C. | 3.80 | 4.44 | 8.52 | 2.44 | 2.04 |
+| NORTH | 4.43 | 4.70 | 5.85 | 5.39 | 4.37 |
+| NYCA | 4.03 | 4.95 | 8.50 | 2.81 | 2.58 |
+| WEST | 4.39 | 5.12 | 7.40 | 3.42 | 2.93 |
+| **pooled (11 zones + NYCA)** | **5.56** | **6.61** | **10.31** | **4.85** | **4.38** |
 
-Dollars at risk over the year, Σ |deviation × (RT − DA)| across the 11 priced zones (`scripts/imbalance_report.py --name default`): NYISO pre-close $158M, model $218M, best naive $335M. Signed totals against perfect foresight range from $21M to $86M with 95% bootstrap intervals about ±$35M wide, so they do not rank strategies.
+Dollars at risk over the year, Σ |deviation × (RT − DA)| across the 11 priced zones (`scripts/imbalance_report.py --name default`): NYISO pre-close $158M, model $184M, best naive $335M. Signed totals against perfect foresight range from $21M to $86M with 95% bootstrap intervals about ±$29M wide, so they do not rank strategies.
 
 What the table says, under the reporting rules in the plan:
 
-- **NYISO's own forecast is more accurate than this model** by a wide margin, so
-  accuracy is not the headline. The model beats every naive baseline and closes part of
-  the gap with weather; the remaining gap is the ISO's weather feeds and decades of
-  tuning versus a 120-day window and one temperature series per zone.
+- **NYISO's own forecast is more accurate than this model** in every zone except CENTRL and NORTH, so accuracy
+  is not the headline. The model beats the best naive baseline by 46% relative
+  error; hourly weather (temperature, humidity, cloud, wind, radiation) and a one-year
+  training window are what closed the gap from the first full run. The remaining gap
+  is the ISO's richer weather feeds and decades of tuning versus one station per zone.
 - **The cost-aware α-bid is a secondary result.** In signed dollars against perfect
   foresight no strategy is distinguishable over one year: the 95% bootstrap intervals
   of the yearly totals are several times wider than the differences between strategies,
@@ -59,7 +60,7 @@ What the table says, under the reporting rules in the plan:
   (Σ |deviation × spread|) do track accuracy, which is the number a desk can act on.
 - **What is measured and true:** a leakage-honest day-ahead protocol on public data,
   P10–P90 bands that reach 77% coverage after a trailing conformal
-  rescaling (raw quantile trees: 45%), and a settlement layer that prices
+  rescaling (raw quantile trees: 52%), and a settlement layer that prices
   every forecast the way the market does.
 
 ## Data

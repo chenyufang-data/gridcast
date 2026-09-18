@@ -13,18 +13,22 @@ fetched, never redistributed).
 | `skill_baselines.py` | persistence D−2, D−7, mean(D−7, D−14) and NYISO's `isolf` (pre-close = file named D−1, post-close = file named D) on the same (zone, day) pairs; `results/<name>/baselines.csv` |
 | `imbalance_report.py` | settlement in $ vs perfect foresight for every strategy incl. `isolf + α`, our median and our α-bid; per zone and pooled; prints the headline check |
 | `quantile_calibration.py` | P10/P90 coverage at slot and hourly resolution, before and after a trailing-30-day conformal rescaling |
+| `compare_runs.py` | scores experiment runs against a base run on exactly the same (zone, day) pairs, so partial sweeps stay comparable |
 
 Typical sequence:
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\backfill.py
 .\.venv\Scripts\python.exe scripts\fetch_weather.py
-.\.venv\Scripts\python.exe scripts\run_backtest.py --name default            # ~35 min with 14 workers
+.\.venv\Scripts\python.exe scripts\run_backtest.py --name default            # ~1.5 h with 14 workers (365-day window)
 .\.venv\Scripts\python.exe scripts\skill_baselines.py --name default
 .\.venv\Scripts\python.exe scripts\imbalance_report.py --name default
 .\.venv\Scripts\python.exe scripts\quantile_calibration.py --name default
 ```
 
-`run_backtest.py` flags for the sensitivity sweep recorded in `docs/experiments.md`:
-`--window`, `--half-life`, `--target-mode {mw,ratio}`, `--no-weather`,
-`--weather-lead {d2,d1}`, `--alpha-window`, `--zones`, `--start/--end`.
+`run_backtest.py` flags for the sweeps recorded in `docs/experiments.md`:
+`--window`, `--half-life`, `--decay-floor`, `--target-mode {mw,ratio}`, `--no-weather`,
+`--no-hourly-weather`, `--no-extra-weather`, `--weather-lead {d2,d1}`, `--daytype`,
+`--n-estimators`, `--learning-rate`, `--num-leaves`, `--min-child-samples`,
+`--alpha-window`, `--zones`, `--start/--end`. The per-day cache is keyed by `--name`
+only, so a new configuration always needs a new name.
