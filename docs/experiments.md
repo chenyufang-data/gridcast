@@ -14,7 +14,7 @@ redistributed; Open-Meteo previous-runs forecasts for weather.
 
 | Item | Value |
 |---|---|
-| Cutoff | D−1 05:00 ET; `model.forecast_day` raises on any slot ending later |
+| Cutoff | D−1 05:00 ET; `models.forecast_day` raises on any slot ending later |
 | Target | 15-min mean MW per zone (96 slots; 92 / 100 on DST days), hourly means for bidding and scoring |
 | Training window | `[D−1−W, D−2]` with W = 365 days, decay weight `0.5^(age/90 d)` (first full run: 120 d / 32 d) |
 | Features | same-tod lags 2/3/7/14/21 d and their daily levels; D−1 00:00–04:45 morning level and its ratios to D−2 / D−8 mornings; weekly aggregates, trends, shapes; weekday, US federal holiday (+ holiday tomorrow); temperature forecast per day (mean/min/max, deviation from the trailing 7 forecast days ending D−2) and per hour (`temp_h`, apparent temperature, dew point, humidity, cloud cover, wind, shortwave radiation, 3-h temperature mean) |
@@ -22,6 +22,8 @@ redistributed; Open-Meteo previous-runs forecasts for weather.
 | Model | LightGBM MAE objective, 600 trees, lr 0.02, 31 leaves, depth 5, subsample 0.7, colsample 0.6; quantile objective at 0.1 / 0.9 for the band and at α for the bid |
 | α | newsvendor ratio `c_under / (c_under + c_over)` of the trailing 30-day RT−DA spread per zone, slots ending at or before the cutoff |
 | Baselines | persistence D−2, D−7, mean(D−7, D−14); `isolf_pre` (file named D−1, known before the cutoff); `isolf_post` (file named D, posted ~07:10–08:00 ET on D−1, after the cutoff) |
+| History | archive from **2024-09-01** (24 months; adopted in §2c). §2, §2b and §3 were run with the archive starting 2025-06-01, reproducible with `--history-start 2025-06-01` |
+| Estimators | `models/`: LightGBM (default) and XGBoost per slot with time-decay weights, optional swap-noise augmentation; a Temporal Fusion Transformer (`scripts/run_tft.py`, global over zones, periodic refits) |
 
 ## 2. Sensitivity sweep (N.Y.C. and WEST, full 12 months)
 
@@ -77,8 +79,59 @@ the leakage-free lead, 600 trees @ lr 0.02, no day-type features** (`--daytype` 
 `--decay-floor` stay available as experiment flags). The first full run is kept as
 `results/v1_w120` for the comparison column in §3.
 
+## 2c. Data length, estimators, augmentation and a sequence model (NYCA, N.Y.C., MHK VL, full 12 months)
+
+With a 365-day window the first eight months of the backtest had trained on a partly
+filled window (91 days on 2025-09-01), because the archive started on 2025-06-01. The
+archive and the weather were backfilled to **2024-09-01** (24 months; 42 s and 30 s), and
+the following runs were made on the three zones that matter most (statewide total,
+largest zone, hardest zone), scored on identical zone-days against the `default` run of §3
+with `scripts/compare_runs.py --base default --runs ... --bootstrap` (paired bootstrap over
+days, 95% intervals).
+
+| Run | Change | NYCA | N.Y.C. | MHK VL | Pooled | Δ vs default [95% CI] | Raw P10–P90 | Wall time |
+|---|---|---|---|---|---|---|---|---|
+| `default` (same days) | 12 months of data, LightGBM | 4.03 | 3.80 | 8.19 | 5.34 | — | 52% | — |
+| `lgbm24` | 24 months of data | 3.85 | 3.55 | 7.85 | 5.08 | **−0.26 [−0.32, −0.20]** | 57% | 29 min, 12 workers |
+| `xgb24` | + `--estimator xgb` | 3.81 | 3.51 | 7.86 | 5.06 | −0.28; vs `lgbm24` −0.02 [−0.07, +0.02] | 70% | 29 min |
+| `swap24` | + `--augment swap` (p 0.1, one copy at weight 0.5, donors within the same tod) | 3.87 | 3.51 | 7.88 | 5.09 | −0.25; vs `lgbm24` +0.01 [−0.02, +0.03] | 58% | ~45 min |
+| `tft24` | Temporal Fusion Transformer, one global model over the 12 zones, refit monthly | **2.91** | **2.94** | **7.36** | **4.40** | **−0.94 [−1.09, −0.78]**; vs `lgbm24` −0.68 [−0.82, −0.53] | 77% | 30 min on the GPU |
+| `tft24_seed1` | same, seed 1 | 2.93 | 2.92 | 7.41 | 4.42 | −0.92 | 75% | 52 min (GPU shared) |
+| NYISO `isolf_pre` (same days) | fair ISO benchmark | 2.81 | 2.44 | 7.80 | 4.35 | | | |
+| NYISO `isolf_post` (same days) | post-close reference | 2.58 | 2.04 | 7.32 | 3.98 | | | |
+
+Verdicts:
+
+- **24 months of data: adopted** (`WARMUP_START = 2024-09-01`; `--history-start 2025-06-01`
+  reproduces the old setting). The gain sits in September–April (−0.2 to −1.0 per month,
+  December −0.96) and vanishes from May on, when both configurations already had a full
+  window: exactly the mechanism expected. Cost: one forecast (four fits) takes a flat
+  12.4 s instead of 3.7 → 12.4 s over the year, ≈ 1.55× the compute; a full 12-zone run
+  should take ≈ 100–110 min instead of 72.
+- **XGBoost: a wash** on accuracy at the same runtime; its quantile objective is better
+  calibrated (raw coverage 70% vs 57%). Kept as `--estimator xgb`, not the default.
+- **Swap noise: null** (+0.01 [−0.02, +0.03]). Kept as a flag for the record.
+- **TFT: the strongest model by a wide margin**, robust to the seed (0.02 between seeds),
+  level with the ISO's pre-close forecast pooled over these zones (4.40 vs 4.35), ahead of
+  it on MHK VL (7.36 vs 7.80) and within 0.1 on NYCA. Its raw band already covers 77%,
+  where the trees need the conformal rescaling to get there. One protocol difference,
+  stated wherever the number is quoted: the weights are refit once per 30-day block on the
+  365 days before the block's first cutoff, while the encoder of every forecast stops at
+  that day's own cutoff; the leakage audit covered the encoder cut (asserted NaN beyond
+  the cutoff), the training targets (all before the block's first cutoff), the per-zone
+  scale and early-stopping split (training window only) and the weather (the same 2-day
+  lead the trees use). 13 fits of 84–204 s on an RTX 5080 (torch 2.11 + cu128); inference
+  is instant on a CPU.
+
+Not yet done: the full 12-zone runs of `lgbm24` and `tft24` (the headline rules apply to
+those, not to a three-zone table); the weekly-refit TFT (`tft24_w7`, appended below when
+finished); the Phase 3 consequence (the VM would need torch for inference, with the
+monthly refit on the laptop and the weights shipped as an artifact, or the trees stay the
+served model).
+
 ## 3. Full run (11 zones + NYCA)
 
+Run before §2c, i.e. on the archive starting 2025-06-01 (12 months of data).
 `scripts/run_backtest.py --name default --workers 14`, then `skill_baselines.py`,
 `imbalance_report.py`, `quantile_calibration.py` with `--name default`. Committed tables:
 `results/default/summary.csv`, `baselines_summary.csv`, `imbalance_pooled.csv`,
@@ -143,6 +196,8 @@ Negative or null results (kept so nobody repeats them):
 - α-bid via quantile LightGBM: the under-dispersed quantiles move the bid by ~40 MW on a
   6,000 MW zone, and the empirical-ratio variant (which does move it) costs more, not less.
 - Signed imbalance dollars over 12 months cannot rank strategies (see §3.2).
+- XGBoost instead of LightGBM: −0.02 [−0.07, +0.02] on 24 months of data (§2c).
+- Swap-noise augmentation of the training rows: +0.01 [−0.02, +0.03] (§2c).
 
 Open items, in the order they are likely to pay off:
 
@@ -153,5 +208,7 @@ Open items, in the order they are likely to pay off:
    clearly named variant if ever run.
 3. Blending model and `isolf_pre` per zone with weights fitted on trailing days.
 4. Band calibration per hour of day rather than one scale per day.
-5. Two winters of data once the archive backfill reaches back to 2024 (the plan's Q2
-   option), so both DST transitions and every holiday are seen twice.
+5. The full 12-zone runs on 24 months of data for both the trees and the TFT (§2c), then
+   the refit cadence of the TFT (weekly vs monthly) and its band per hour of day.
+6. Two winters of data: the archive now starts 2024-09-01, so the second winter arrives
+   with the 2026–27 season; nothing to do until then.

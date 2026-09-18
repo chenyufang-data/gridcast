@@ -33,7 +33,7 @@ lock file, logging, type hints, LICENSE, data provenance, year-proof holidays).
   `src/baselines.py` (persistence family, `isolf_pre` / `isolf_post`),
   `src/backtest.py` (per-(zone, month) process pool, per-day CSV cache), `src/metrics.py`,
   scripts `backfill`, `fetch_weather`, `run_backtest`, `skill_baselines`,
-  `imbalance_report`, `quantile_calibration`. 63 offline tests. Data lives in
+  `imbalance_report`, `quantile_calibration`. 75 offline tests. Data lives in
   `data/processed/*.pkl`, `data/weather*.csv`, per-day results under `results/<name>/`
   (all gitignored except the small summary tables of `results/default/`).
   **Findings (numbers in `docs/experiments.md` and the README results section):**
@@ -51,10 +51,36 @@ lock file, logging, type hints, LICENSE, data provenance, year-proof holidays).
   `results/v1_w120`. `scripts/compare_runs.py` scores experiments against a base run on
   identical zone-days; the per-day cache is keyed by run name only, so every new
   configuration needs a new `--name`. A full 12-zone run takes ~72 min on 14 workers.
-- **Next action: Phase 3** — backend port: `app/db.py` (zones, load/price tables,
+- **Model comparison pass (2026-09-18, after the improvement pass).** `model.py` became the
+  `models/` package: `features.py` (unchanged feature code, `FEATURE_VERSION`), `tabular.py`
+  (`DecayWeighted` around any sklearn-style regressor, `get_model(estimator, quantile=...)`
+  for `lgbm` / `xgb`, `forecast_day(..., estimator, augment_kind, augment_params)`),
+  `augment.py` (swap noise), `tft.py` (Temporal Fusion Transformer in plain torch, global
+  over zones, `scripts/run_tft.py` with periodic refits, same `results/<name>/` layout).
+  `run_backtest.py` gained `--estimator`, `--augment swap`, `--history-start`;
+  `compare_runs.py --bootstrap` gives paired CIs; `summarize_results` moved to
+  `src/backtest.py`. Dependencies: xgboost in the dev lock; torch is an unlocked research
+  extra (`requirements-research.txt`, installed from the cu128 index; the laptop has an
+  RTX 5080 and torch 2.11+cu128 is in the venv; tests skip without it). The archive and
+  weather were backfilled to 2024-09-01 (`WARMUP_START`). **Findings on NYCA + N.Y.C. +
+  MHK VL, 12 months, identical zone-days (docs/experiments.md §2c):** 24 months of data
+  −0.26 pooled [−0.32, −0.20] (adopted; ≈ 1.55× compute, full run ≈ 100–110 min); XGBoost
+  a wash; swap noise null; **TFT −0.94 [−1.09, −0.78], pooled 4.40 vs isolf_pre 4.35,
+  ahead of the ISO on MHK VL, 77% raw band, seed-robust**, monthly refits of 84–204 s on
+  the GPU. The 12-zone tables in the README are still the 12-month-data LightGBM run.
+  Gotcha: a 12-worker run once died with `BrokenProcessPool` near its end while the
+  machine was loaded; re-running the same `--name` resumed from the per-day cache in
+  two minutes.
+- **Next action: decide the shipped model, then Phase 3.** Run the full 12-zone backtests
+  on 24 months of data — `scripts/run_backtest.py --name default24 --workers 14` (~110 min)
+  and `scripts/run_tft.py --name tft_full --train-zones all` (~40 min, GPU) — plus the
+  report scripts on both, then apply the headline rules. If the TFT holds up, Phase 3
+  serves it (CPU inference is instant; the monthly refit runs on the laptop and the weights
+  ship as an artifact, or the VM refits on CPU); otherwise the trees stay the served model.
+  Phase 3 itself: backend port: `app/db.py` (zones, load/price tables,
   forecasts + values, `schedules`, `forecast_scores` with `imbalance_usd` / `da_cost_usd`,
   alerts), `app/service.py` (ingest via `ArchiveClient` + `resample_slots`, train-on-demand
-  via `model.forecast_day` with the conformal band scaling and the α-bid, versioning hash
+  via `models.forecast_day` (or the TFT) with the conformal band scaling and the α-bid, versioning hash
   incl. `FEATURE_VERSION`, scoring in MAPE and $, α estimation from `src.settlement`),
   `app/main.py` (`X-Admin-Token` middleware on POST/PATCH/DELETE, per-IP rate limit,
   endpoints for zones/forecasts/schedules/scores/prices/isolf), scheduler (04:30 ET
@@ -70,7 +96,7 @@ lock file, logging, type hints, LICENSE, data provenance, year-proof holidays).
 | Topic | Decision |
 |---|---|
 | Zones | backtest all 11 zones + NYCA; demo default N.Y.C. |
-| Backtest range | 2025-09-01 → 2026-08-31, warm-up data from 2025-06-01 |
+| Backtest range | 2025-09-01 → 2026-08-31, warm-up data from **2024-09-01** (24 months; changed from 2025-06-01 on 2026-09-18 after the §2c measurement, `--history-start` reproduces the old setting) |
 | Data terms | proceed: fetch-not-redistribute (no NYISO bytes in git), **cite the original source with a link everywhere data appears** (README, `data/README.md`, UI footer), no NYISO logo |
 | Access model | public read, `X-Admin-Token` on every write endpoint, in-app per-IP rate limiting, nightly reset-to-seed **off** |
 | Headline rules | MAPE is not the headline if NYISO's `isolf` beats ours. The α-bid leads only if measured in $, beats the strongest baseline incl. `isolf + α`, and α is estimated strictly before each cutoff; otherwise secondary. Every headline has a window and a one-command script |
@@ -109,7 +135,7 @@ lock file, logging, type hints, LICENSE, data provenance, year-proof holidays).
 
 | Module | Source LOC | Plan | Est. new/rewritten |
 |---|---|---|---|
-| `model.py` | 481 | keep repair, decay wrapper, `get_model`, shape features; replace day-lag scheme with cutoff-timestamp lags, DST-aware grid, `holidays` lib | ~200 |
+| `models/` (was `model.py`) | 481 | done: `features.py` (cutoff-timestamp lags, DST grid, `holidays`), `tabular.py` (decay wrapper, LightGBM + XGBoost, `forecast_day`), `augment.py`, `tft.py` | ~900 |
 | `src/` backtest + config | 182 | rewrite: cutoff, per-zone, parallel, CLI (`scripts/run_backtest.py`); `src/config.py` done | ~250 |
 | `app/nyiso.py` (new) | — | fetch/cache/normalize incl. DST + dedupe | ~300 |
 | `app/adapters.py` | 290 | keep as secondary CSV path | ~30 |

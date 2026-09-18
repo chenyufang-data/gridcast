@@ -64,6 +64,8 @@ def archive_url(file_type: str, name: str) -> str:
 
 
 # --- backtest (docs/plan.md §3) ----------------------------------------------------
-WARMUP_START = date(2025, 6, 1)  # lags and alpha windows need history before the first bid
+# 24 months of history: every backtest day trains on a full 365-day window (docs/experiments.md
+# section 2c measured -0.26 pooled MAPE against a 2025-06-01 start; `--history-start` reproduces it)
+WARMUP_START = date(2024, 9, 1)
 BACKTEST_START = date(2025, 9, 1)
 BACKTEST_END = date(2026, 8, 31)

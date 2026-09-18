@@ -85,7 +85,9 @@ Weather: Open-Meteo previous-runs API for each zone centroid, D−1-issued forec
   quantiles α=0.1/0.9 for the band; a third quantile model at the estimated α per zone for
   the bid. Sensitivity sweep, not tuning; experiment log with negative results.
 - **Backtest**: rolling daily retrain, **2025-09-01 → 2026-08-31** (12 months, all four
-  seasons; Q2), all 11 zones + NYCA, warm-up data from 2025-06-01 for lags and α windows.
+  seasons; Q2), all 11 zones + NYCA, warm-up data from 2024-09-01 (a full 365-day window
+  for every backtest day; adopted 2026-09-18 after the measurement in docs/experiments.md
+  §2c, initially 2025-06-01).
   Compute estimate: 12 zones × 365 days × 3 fits × ~2 s ≈ 6 h single-core → parallelize
   by zone, cache per-day results.
 - **Settlement metric**: per 15-min slot, deviation × (mean of the three 5-min RT LBMPs −

@@ -63,6 +63,13 @@ What the table says, under the reporting rules in the plan:
   rescaling (raw quantile trees: 52%), and a settlement layer that prices
   every forecast the way the market does.
 
+Since this run, a three-zone comparison (`docs/experiments.md` §2c: NYCA, N.Y.C., MHK VL,
+same 12 months) found two things the table above does not yet include: 24 months of
+history instead of 12 (−0.26 pooled MAPE, adopted as the default), and a Temporal Fusion
+Transformer (`models/tft.py`, −0.94; pooled 4.40 vs the ISO's 4.35 on those zones, ahead of
+the ISO on MHK VL). XGBoost and swap-noise augmentation were null results. The full
+12-zone re-run with both is the next step; until then the table above is the headline.
+
 ## Data
 
 **Data: NYISO public MIS archive (<http://mis.nyiso.com/public/csv/>), fetched at
@@ -73,7 +80,7 @@ project. Details, verified file layouts, and the DST gotchas: [data/README.md](d
 ## Layout
 
 ```
-model.py        modeling core shared by src/ and app/: cutoff guard, features, LightGBM
+models/         modeling package shared by src/ and app/: cutoff guard, features, LightGBM / XGBoost, swap-noise augmentation, TFT
 src/            constants, dataset builder, backtest engine, settlement, baselines, metrics
 app/            NYISO archive client, weather provider, logging, FastAPI (service: Phase 3)
 frontend/       Streamlit UI, HTTP client of the API only (Phase 4)
