@@ -26,7 +26,7 @@ import pandas as pd
 
 from app.nyiso import PROJECT_ROOT
 from app.weather import features_for, hourly_features_for
-from model import DECAY_HALF_LIFE_DAYS, SLOT, LeakageError, cutoff_for, forecast_day
+from model import SLOT, LeakageError, cutoff_for, forecast_day
 from src.config import BACKTEST_END, BACKTEST_START, NYCA, ZONES
 from src.settlement import alpha_series
 
@@ -54,16 +54,14 @@ class BacktestConfig:
     start: date = BACKTEST_START
     end: date = BACKTEST_END
     zones: tuple[str, ...] = (*ZONES, NYCA)
-    window_days: int = 120
-    half_life: float = DECAY_HALF_LIFE_DAYS
+    window_days: int = 365
+    half_life: float = 90.0  # slower decay so last year's season stays in range
     quantiles: tuple[float, ...] = (0.1, 0.9)
     alpha_window_days: int = 30
     weather_lead: str | None = "d2"  # None = no weather features
     target_mode: str = "mw"  # "mw" (load directly) or "ratio" (y / same-slot 3-week mean)
     hourly_weather: bool = True  # forecast temperature at each hour (temp_h); the sweep winner
-    extra_weather: bool = (
-        False  # apparent temp, dew point, humidity, cloud, wind, radiation per hour
-    )
+    extra_weather: bool = True  # apparent temp, dew point, humidity, cloud, wind, radiation
     daytype: bool = False  # weekend/holiday type and same-type lag anchors
     decay_floor: float = 0.0  # minimum sample weight (keeps last year's season in range)
     workers: int = 1

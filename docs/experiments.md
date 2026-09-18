@@ -51,6 +51,32 @@ Observations that shaped the default:
 - The raw quantile band is badly under-dispersed (≈ 40% coverage for a nominal 80%):
   the conformal rescaling in `scripts/quantile_calibration.py` is mandatory, not optional.
 
+## 2b. Improvement sweep after the first full run (N.Y.C. and MHK VL, 2026-03-01 → 2026-08-31)
+
+The error analysis of the first full run (§3.1) showed the gap to the ISO concentrated
+in daytime hours, in spring/early summer regime shifts (a May heat wave under-forecast
+by 15–21% with nothing that hot inside a 120-day window), on weekends (+3.5% bias) and
+above 20 °C. Four candidate fixes were run on the two most informative zones over the
+hard half of the year and scored with `scripts/compare_runs.py` against the default on
+exactly the same days (default on those days: N.Y.C. 5.01, MHK VL 12.91, pooled 8.96).
+
+| Run | Flags | N.Y.C. | MHK VL | Pooled | Δ vs default | Verdict |
+|---|---|---|---|---|---|---|
+| `imp_extra` | `--extra-weather` (apparent temperature, dew point, humidity, cloud, wind, radiation per hour + 3-h temperature mean) | 4.57 | 10.43 | 7.50 | **−1.46** | the single biggest gain, most of it in the hard zone |
+| `imp_daytype` | `--daytype` (weekend/holiday type, same-type lag anchors) | 4.92 | 13.07 | 8.99 | +0.03 | **null** on its own |
+| `imp_w365_hl90` | `--window 365 --half-life 90` | 4.43 | 12.61 | 8.52 | −0.44 | last summer in range helps the transition months |
+| `imp_w365_floor` | `--window 365 --decay-floor 0.15` | 4.41 | 12.21 | 8.31 | −0.65 | a weight floor beats a slower decay |
+| `imp_combo` | 365 d, half-life 90, extra weather, day-type | 3.97 | 10.10 | 7.04 | −1.92 | gains add up |
+| `imp_combo_leaves` | combo + 63 leaves, 15 min child, 900 trees | 3.90 | 10.03 | 6.97 | −1.99 | +0.07 for 1.5× compute: not adopted |
+| `imp_combo_floor` | 365 d, floor 0.15, extra weather, day-type | 3.92 | 10.05 | 6.99 | −1.97 | equal to the combo within noise |
+| `imp_combo_nodaytype` | 365 d, half-life 90, extra weather | 4.03 | 10.02 | 7.02 | −1.93 | **adopted**: same result without the null feature group |
+
+New default after this sweep: **window 365, half-life 32 → 90, MW target, daily + hourly
+weather incl. apparent temperature / dew point / humidity / cloud / wind / radiation at
+the leakage-free lead, 600 trees @ lr 0.02, no day-type features** (`--daytype` and
+`--decay-floor` stay available as experiment flags). The first full run is kept as
+`results/v1_w120` for the comparison column in §3.
+
 ## 3. Full run (11 zones + NYCA)
 
 `scripts/run_backtest.py --name default --workers 14` (1998 s wall on a 16-thread laptop),

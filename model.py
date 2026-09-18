@@ -394,7 +394,7 @@ def forecast_day(
     weather_hourly: pd.DataFrame | None = None,
     quantiles: tuple[float, ...] = (0.1, 0.9),
     alpha: float | None = None,
-    window_days: int = 120,
+    window_days: int = 365,
     model_overrides: dict[str, Any] | None = None,
     target_mode: str = "mw",
     daytype: bool = False,

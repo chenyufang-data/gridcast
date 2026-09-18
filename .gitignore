@@ -32,6 +32,13 @@ results/default/*
 !results/default/imbalance_pooled.csv
 !results/default/imbalance_by_zone.csv
 !results/default/calibration.csv
+!results/v1_w120/
+results/v1_w120/*
+!results/v1_w120/summary.csv
+!results/v1_w120/baselines_summary.csv
+!results/v1_w120/imbalance_pooled.csv
+!results/v1_w120/imbalance_by_zone.csv
+!results/v1_w120/calibration.csv
 *.png
 
 # editors / tooling

@@ -70,8 +70,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--start", type=date.fromisoformat, default=BACKTEST_START)
     parser.add_argument("--end", type=date.fromisoformat, default=BACKTEST_END)
     parser.add_argument("--workers", type=int, default=12)
-    parser.add_argument("--window", type=int, default=120, help="training window (days)")
-    parser.add_argument("--half-life", type=float, default=32.0, help="time-decay half-life (days)")
+    parser.add_argument("--window", type=int, default=365, help="training window (days)")
+    parser.add_argument("--half-life", type=float, default=90.0, help="time-decay half-life (days)")
     parser.add_argument(
         "--alpha-window", type=int, default=30, help="trailing days for the α estimate"
     )
@@ -84,8 +84,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--n-estimators", type=int, default=600)
     parser.add_argument(
-        "--extra-weather",
-        action="store_true",
+        "--no-extra-weather",
+        dest="extra_weather",
+        action="store_false",
         help="apparent temp, dew point, humidity, cloud, wind, radiation per hour",
     )
     parser.add_argument(
