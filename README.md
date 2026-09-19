@@ -18,57 +18,63 @@ LightGBM · FastAPI · SQLite · Streamlit · Docker · Caddy.
 
 ## Results (12 months, 2025-09-01 → 2026-08-31, all 11 zones + NYCA)
 
-Protocol: one fresh LightGBM retrain per zone and day on data ending at or before the
-**D−1 05:00 ET** bid cutoff (the code raises if anything later leaks in), scored at
-hourly resolution, the DAM product and the only fair comparison with NYISO's hourly
-forecast. Two ISO benchmarks are shown because of a fact verified in this repo: the
-NYISO forecast file named for day D is posted on D−1 between 07:10 and 08:00 ET, *after*
-the bid close. `isolf_pre` (file named D−1) is what a bidder had at the cutoff;
-`isolf_post` (file named D) is the stronger post-close reference.
+Two models under one protocol, scored on the same 4,380 zone-days at hourly
+resolution, the DAM product and the only fair comparison with NYISO's hourly forecast:
 
-Hourly MAPE (%), lower is better; `scripts/skill_baselines.py --name default`:
+- **TFT** (`models/tft.py`, the served model): one Temporal Fusion Transformer over all 12
+  zones, refit monthly on the 365 days before the block's first cutoff; every forecast
+  uses an encoder that stops at that day's **D−1 05:00 ET** bid cutoff.
+- **Trees** (`models/tabular.py`, the fallback and the model the demo retrains live): one
+  fresh LightGBM fit per zone and day on the 365 days before the cutoff. The code raises
+  if anything later than the cutoff leaks into either model.
 
-| Zone | Model | First full run (120 d, temperature only) | Best naive | NYISO pre-close (fair) | NYISO post-close |
-|---|---|---|---|---|---|
-| CAPITL | 6.35 | 7.67 | 11.08 | 5.33 | 5.09 |
-| CENTRL | 6.06 | 7.51 | 10.65 | 6.32 | 6.15 |
-| DUNWOD | 4.72 | 5.49 | 10.07 | 3.75 | 3.40 |
-| GENESE | 5.59 | 6.88 | 10.17 | 4.69 | 4.31 |
-| HUD VL | 6.38 | 7.65 | 12.33 | 6.20 | 5.30 |
-| LONGIL | 5.78 | 7.19 | 10.97 | 4.05 | 3.60 |
-| MHK VL | 8.19 | 10.11 | 13.86 | 7.80 | 7.32 |
-| MILLWD | 6.99 | 7.67 | 12.60 | 5.97 | 5.41 |
-| N.Y.C. | 3.80 | 4.44 | 8.52 | 2.44 | 2.04 |
-| NORTH | 4.43 | 4.70 | 5.85 | 5.39 | 4.37 |
-| NYCA | 4.03 | 4.95 | 8.50 | 2.81 | 2.58 |
-| WEST | 4.39 | 5.12 | 7.40 | 3.42 | 2.93 |
-| **pooled (11 zones + NYCA)** | **5.56** | **6.61** | **10.31** | **4.85** | **4.38** |
+Two ISO benchmarks are shown because of a fact verified in this repo: the NYISO forecast
+file named for day D is posted on D−1 between 07:10 and 08:00 ET, *after* the bid close.
+`isolf_pre` (file named D−1) is what a bidder had at the cutoff; `isolf_post` (file
+named D) is the stronger post-close reference. Data: 24 months of history (2024-09-01 on).
 
-Dollars at risk over the year, Σ |deviation × (RT − DA)| across the 11 priced zones (`scripts/imbalance_report.py --name default`): NYISO pre-close $158M, model $184M, best naive $335M. Signed totals against perfect foresight range from $21M to $86M with 95% bootstrap intervals about ±$29M wide, so they do not rank strategies.
+Hourly MAPE (%), lower is better; `scripts/skill_baselines.py --name tft_full` and `--name default`; last column from `scripts/compare_runs.py`-style paired bootstrap over days:
+
+| Zone | **TFT** (served) | Trees (fallback) | Best naive | NYISO pre-close (fair) | NYISO post-close | TFT − pre-close, daily [95% CI] |
+|---|---|---|---|---|---|---|
+| CAPITL | 5.43 | 6.08 | 11.08 | 5.33 | 5.09 | +0.10 [-0.21, +0.43] level |
+| CENTRL | 5.11 | 5.78 | 10.65 | 6.32 | 6.15 | -1.21 [-1.57, -0.85] better |
+| DUNWOD | 4.01 | 4.55 | 10.07 | 3.75 | 3.40 | +0.27 [-0.00, +0.55] level |
+| GENESE | 4.66 | 5.33 | 10.17 | 4.69 | 4.31 | -0.03 [-0.32, +0.26] level |
+| HUD VL | 5.24 | 6.07 | 12.33 | 6.20 | 5.30 | -0.95 [-1.31, -0.59] better |
+| LONGIL | 4.44 | 5.56 | 10.97 | 4.05 | 3.60 | +0.39 [+0.13, +0.65] worse |
+| MHK VL | 7.46 | 7.85 | 13.86 | 7.80 | 7.32 | -0.33 [-0.79, +0.15] level |
+| MILLWD | 6.29 | 6.61 | 12.60 | 5.97 | 5.41 | +0.32 [-0.07, +0.71] level |
+| N.Y.C. | 2.93 | 3.55 | 8.52 | 2.44 | 2.04 | +0.49 [+0.30, +0.69] worse |
+| NORTH | 4.47 | 4.41 | 5.85 | 5.39 | 4.37 | -0.92 [-1.20, -0.65] better |
+| NYCA | 2.94 | 3.85 | 8.50 | 2.81 | 2.58 | +0.13 [-0.09, +0.36] level |
+| WEST | 4.58 | 4.32 | 7.40 | 3.42 | 2.93 | +1.16 [+0.86, +1.45] worse |
+| **pooled (11 zones + NYCA)** | **4.80** | **5.33** | **10.31** | **4.85** | **4.38** | -0.05 [-0.15, +0.04] level |
+
+Dollars at risk over the year, Σ |deviation × (RT − DA)| across the 11 priced zones (`scripts/imbalance_report.py`): NYISO pre-close $158M, TFT $154M, trees $181M, best naive $335M. Signed totals against perfect foresight have 95% bootstrap intervals about ±$26M wide, so they do not rank strategies.
 
 What the table says, under the reporting rules in the plan:
 
-- **NYISO's own forecast is more accurate than this model** in every zone except CENTRL and NORTH, so accuracy
-  is not the headline. The model beats the best naive baseline by 46% relative
-  error; hourly weather (temperature, humidity, cloud, wind, radiation) and a one-year
-  training window are what closed the gap from the first full run. The remaining gap
-  is the ISO's richer weather feeds and decades of tuning versus one station per zone.
+- **The TFT matches NYISO's own day-ahead forecast.** Pooled over 12 zones and 12 months it
+  is level with the ISO's pre-close forecast (4.80 vs 4.85; paired daily
+  difference -0.05 with a 95% interval of [-0.15, +0.04]),
+  significantly ahead in CENTRL, HUD VL, NORTH and behind in LONGIL, N.Y.C., WEST;
+  post-close the ISO is better by 0.42. The rule says MAPE is not the headline when the ISO beats us; here
+  neither beats the other, so the claim is "matches", stated with its window, never "beats".
+- **The trees are the fallback**, at 5.33 pooled (+0.48 against the ISO's pre-close,
+  ahead in CENTRL, NORTH), 48% better than the best naive
+  baseline, and the model the demo can retrain in seconds.
 - **The cost-aware α-bid is a secondary result.** In signed dollars against perfect
   foresight no strategy is distinguishable over one year: the 95% bootstrap intervals
   of the yearly totals are several times wider than the differences between strategies,
   because real-time price spikes dominate the sum. The dollars *at risk*
   (Σ |deviation × spread|) do track accuracy, which is the number a desk can act on.
-- **What is measured and true:** a leakage-honest day-ahead protocol on public data,
-  P10–P90 bands that reach 77% coverage after a trailing conformal
-  rescaling (raw quantile trees: 52%), and a settlement layer that prices
-  every forecast the way the market does.
-
-Since this run, a three-zone comparison (`docs/experiments.md` §2c: NYCA, N.Y.C., MHK VL,
-same 12 months) found two things the table above does not yet include: 24 months of
-history instead of 12 (−0.26 pooled MAPE, adopted as the default), and a Temporal Fusion
-Transformer (`models/tft.py`, −0.94; pooled 4.40 vs the ISO's 4.35 on those zones, ahead of
-the ISO on MHK VL). XGBoost and swap-noise augmentation were null results. The full
-12-zone re-run with both is the next step; until then the table above is the headline.
+- **Bands.** The TFT's raw P10–P90 band covers 75% of 15-min actuals
+  (77% after the trailing conformal rescaling, target 80%); the trees'
+  quantile objective needs the rescaling to get from 57% to 77%.
+- **How it got here** (pooled hourly MAPE, same window): first trees 6.61 (120-day
+  window, temperature only) → 5.56 (365-day window, hourly weather) → 5.33
+  (24 months of history) → TFT 4.80. Every step is in `docs/experiments.md`.
 
 ## Data
 

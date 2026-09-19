@@ -161,39 +161,64 @@ every copy-making kind doubles the training rows, so the tree runs take 1.7–2�
 Frequency masking of the encoder was not run (lowest prior, and both TFT variants were
 already null or negative).
 
-## 3. Full run (11 zones + NYCA)
+## 3. Full runs (11 zones + NYCA, 24 months of history)
 
-Run before §2c, i.e. on the archive starting 2025-06-01 (12 months of data).
-`scripts/run_backtest.py --name default --workers 14`, then `skill_baselines.py`,
-`imbalance_report.py`, `quantile_calibration.py` with `--name default`. Committed tables:
-`results/default/summary.csv`, `baselines_summary.csv`, `imbalance_pooled.csv`,
-`imbalance_by_zone.csv`, `calibration.csv`.
+`scripts/run_tft.py --name tft_full --train-zones all` (monthly refits, GPU, 365 days × 12 zones)
+and `scripts/run_backtest.py --name default --workers 14` (one fit per zone-day), then
+`skill_baselines.py`, `imbalance_report.py`, `quantile_calibration.py` with each name. Committed
+tables: `results/tft_full/` and `results/default/` (`summary.csv`, `baselines_summary.csv`,
+`imbalance_pooled.csv`, `imbalance_by_zone.csv`, `calibration.csv`). Earlier full runs are kept
+for the record: `results/v1_w120` (120-day window, temperature only, 12 months of history:
+6.61 pooled) and `results/v2_12mo` (365-day window, hourly weather, 12 months of
+history: 5.56).
 
-### 3.1 Accuracy (hourly MAPE, %) and band coverage (15-min, nominal 80%)
+### 3.1 Accuracy (hourly MAPE, %) with paired bootstraps against the ISO pre-close forecast
 
-| Zone | Model | persist D−2 | persist D−7 | mean(D−7, D−14) | isolf_pre | isolf_post | P10–P90 raw | conformal |
-|---|---|---|---|---|---|---|---|---|
-| CAPITL | 6.35 | 11.41 | 12.23 | 11.08 | 5.33 | 5.09 | 52% | 78% |
-| CENTRL | 6.06 | 11.10 | 11.83 | 10.65 | 6.32 | 6.15 | 53% | 77% |
-| DUNWOD | 4.72 | 10.09 | 10.59 | 10.07 | 3.75 | 3.40 | 52% | 78% |
-| GENESE | 5.59 | 11.02 | 11.07 | 10.17 | 4.69 | 4.31 | 53% | 78% |
-| HUD VL | 6.38 | 12.33 | 13.88 | 12.71 | 6.20 | 5.30 | 53% | 78% |
-| LONGIL | 5.78 | 11.02 | 11.60 | 10.97 | 4.05 | 3.60 | 51% | 77% |
-| MHK VL | 8.19 | 14.32 | 15.29 | 13.86 | 7.80 | 7.32 | 54% | 78% |
-| MILLWD | 6.99 | 12.60 | 14.43 | 13.57 | 5.97 | 5.41 | 50% | 77% |
-| N.Y.C. | 3.80 | 9.29 | 8.68 | 8.52 | 2.44 | 2.04 | 51% | 78% |
-| NORTH | 4.43 | 5.85 | 6.93 | 6.24 | 5.39 | 4.37 | 55% | 78% |
-| NYCA | 4.03 | 8.76 | 9.11 | 8.50 | 2.81 | 2.58 | 50% | 77% |
-| WEST | 4.39 | 8.14 | 7.92 | 7.40 | 3.42 | 2.93 | 50% | 76% |
-| pooled | 5.56 | 10.49 | 11.13 | 10.31 | 4.85 | 4.38 | 52% | 77% |
+| Zone | TFT | Trees | persist D−2 | persist D−7 | mean(D−7, D−14) | isolf_pre | isolf_post | TFT − pre [95% CI] | Trees − pre [95% CI] |
+|---|---|---|---|---|---|---|---|---|---|
+| CAPITL | 5.43 | 6.08 | 11.41 | 12.23 | 11.08 | 5.33 | 5.09 | +0.10 [-0.21, +0.43] | +0.75 [+0.43, +1.10] |
+| CENTRL | 5.11 | 5.78 | 11.10 | 11.83 | 10.65 | 6.32 | 6.15 | -1.21 [-1.57, -0.85] | -0.53 [-0.89, -0.17] |
+| DUNWOD | 4.01 | 4.55 | 10.09 | 10.59 | 10.07 | 3.75 | 3.40 | +0.27 [-0.00, +0.55] | +0.80 [+0.54, +1.07] |
+| GENESE | 4.66 | 5.33 | 11.02 | 11.07 | 10.17 | 4.69 | 4.31 | -0.03 [-0.32, +0.26] | +0.64 [+0.33, +0.96] |
+| HUD VL | 5.24 | 6.07 | 12.33 | 13.88 | 12.71 | 6.20 | 5.30 | -0.95 [-1.31, -0.59] | -0.13 [-0.51, +0.23] |
+| LONGIL | 4.44 | 5.56 | 11.02 | 11.60 | 10.97 | 4.05 | 3.60 | +0.39 [+0.13, +0.65] | +1.51 [+1.22, +1.80] |
+| MHK VL | 7.46 | 7.85 | 14.32 | 15.29 | 13.86 | 7.80 | 7.32 | -0.33 [-0.79, +0.15] | +0.05 [-0.39, +0.52] |
+| MILLWD | 6.29 | 6.61 | 12.60 | 14.43 | 13.57 | 5.97 | 5.41 | +0.32 [-0.07, +0.71] | +0.64 [+0.23, +1.06] |
+| N.Y.C. | 2.93 | 3.55 | 9.29 | 8.68 | 8.52 | 2.44 | 2.04 | +0.49 [+0.30, +0.69] | +1.11 [+0.87, +1.35] |
+| NORTH | 4.47 | 4.41 | 5.85 | 6.93 | 6.24 | 5.39 | 4.37 | -0.92 [-1.20, -0.65] | -0.98 [-1.29, -0.67] |
+| NYCA | 2.94 | 3.85 | 8.76 | 9.11 | 8.50 | 2.81 | 2.58 | +0.13 [-0.09, +0.36] | +1.04 [+0.82, +1.27] |
+| WEST | 4.58 | 4.32 | 8.14 | 7.92 | 7.40 | 3.42 | 2.93 | +1.16 [+0.86, +1.45] | +0.90 [+0.65, +1.17] |
+| pooled | 4.80 | 5.33 | 10.49 | 11.13 | 10.31 | 4.85 | 4.38 | -0.05 [-0.15, +0.04] | +0.48 [+0.39, +0.58] |
 
-- The model beats the best naive baseline in every zone (pooled −46% relative error).
-- NYISO's pre-close forecast is better in every zone except CENTRL, NORTH; post-close the model still wins CENTRL.
-- Against the first full run (120-day window, temperature only; `results/v1_w120`), pooled hourly MAPE moved from 6.61 to 5.56; the hard upstate zones gained most (MHK VL 10.11 → 8.19).
-- Raw quantile trees cover 52% of actuals; the trailing-30-day conformal rescaling
-  reaches 77% (target 80%) with 12% below / 11% above.
+- **TFT vs ISO pre-close, pooled: -0.05 [-0.15, +0.04]** — level. Significantly
+  better in CENTRL, HUD VL, NORTH; significantly worse in LONGIL, N.Y.C., WEST; the rest within noise.
+  Post-close the ISO is better by 0.42 pooled.
+- Trees vs ISO pre-close, pooled: +0.48 [+0.39, +0.58]; better in
+  CENTRL, NORTH. Trees vs best naive: −48% relative error.
+- TFT vs trees on the same days: -0.53 pooled (§2c measured -0.94 on three zones with the
+  12-month-history trees as the base; the trees gained 0.23 from the extra year).
+- The TFT's α-bid at hourly resolution scores 4.88 (median 4.80); the
+  trees' 5.39 (median 5.33).
 
-### 3.2 Settlement in dollars (11 priced zones, hourly bids settled per 15-min slot)
+### 3.2 Band coverage (15-min, nominal 80%), raw and after the trailing-30-day conformal rescaling
+
+| Zone | TFT raw | TFT conformal | Trees raw | Trees conformal |
+|---|---|---|---|---|
+| CAPITL | 74% | 77% | 58% | 77% |
+| CENTRL | 76% | 77% | 58% | 77% |
+| DUNWOD | 74% | 77% | 58% | 78% |
+| GENESE | 75% | 77% | 59% | 78% |
+| HUD VL | 75% | 77% | 58% | 78% |
+| LONGIL | 77% | 77% | 56% | 77% |
+| MHK VL | 73% | 79% | 58% | 77% |
+| MILLWD | 72% | 76% | 56% | 77% |
+| N.Y.C. | 81% | 76% | 56% | 77% |
+| NORTH | 78% | 77% | 60% | 78% |
+| NYCA | 77% | 77% | 55% | 77% |
+| WEST | 66% | 75% | 54% | 76% |
+| pooled | 75% | 77% | 57% | 77% |
+
+### 3.3 Settlement in dollars (11 priced zones, hourly bids settled per 15-min slot)
 
 | Strategy | Signed $ vs perfect foresight | 95% bootstrap CI | Σ \|dev × spread\| | $/MWh (signed) |
 |---|---|---|---|---|
@@ -203,17 +228,19 @@ Run before §2c, i.e. on the archive starting 2025-06-01 (12 months of data).
 | `isolf_pre` | $34M | [$8M, $60M] | $158M | 0.226 |
 | `isolf_post` | $26M | [$-2M, $53M] | $148M | 0.171 |
 | `isolf_pre_alpha` | $55M | [$35M, $77M] | $143M | 0.363 |
-| `model` | $46M | [$19M, $74M] | $184M | 0.302 |
-| `model_alpha_bid` | $46M | [$18M, $76M] | $186M | 0.307 |
-| `model_alpha_emp` | $50M | [$18M, $81M] | $190M | 0.328 |
+| `model` (TFT) | $41M | [$26M, $57M] | $154M | 0.269 |
+| `model_alpha_bid` (TFT) | $41M | [$23M, $61M] | $160M | 0.272 |
+| `model_alpha_emp` (TFT) | $41M | [$22M, $60M] | $157M | 0.272 |
+| `model` (trees) | $44M | [$13M, $74M] | $181M | 0.288 |
+| `model_alpha_bid` (trees) | $46M | [$15M, $78M] | $182M | 0.305 |
 
 - α (newsvendor ratio of the trailing 30-day spread) averages 0.41–0.48 by zone:
   real-time prices sit below day-ahead most of the time, so the cost-aware bid is
   slightly *short* of the median.
 - The signed totals are noise: every interval overlaps every other. **The α-bid does not
   meet the headline rule** (docs/plan.md §4) and stays a secondary feature of the product.
-- Σ |dev × spread| (dollars at risk) follows accuracy: ISO $158M <
-  model $184M < naive ≥ $335M.
+- Σ |dev × spread| (dollars at risk) follows accuracy: ISO $158M ≈
+  TFT $154M < trees $181M < naive ≥ $335M.
 
 ## 4. Negative results and open items
 
@@ -242,7 +269,7 @@ Open items, in the order they are likely to pay off:
    clearly named variant if ever run.
 3. Blending model and `isolf_pre` per zone with weights fitted on trailing days.
 4. Band calibration per hour of day rather than one scale per day.
-5. The full 12-zone runs on 24 months of data for both the trees and the TFT (§2c), then
-   the TFT's band per hour of day (weekly refits were a null result).
+5. Band calibration of the TFT per hour of day (its raw band already covers 75%), and a
+   per-zone blend of TFT and trees (they lose to the ISO in different zones).
 6. Two winters of data: the archive now starts 2024-09-01, so the second winter arrives
    with the 2026–27 season; nothing to do until then.

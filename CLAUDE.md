@@ -71,18 +71,27 @@ lock file, logging, type hints, LICENSE, data provenance, year-proof holidays).
   null or worse** — swap +0.01, weather-error injection +0.13, extreme-day weights +0.13,
   C-Mixup +0.25 (trees vs `lgbm24`); aggregate zones +0.08, block bootstrap +0.61 (TFT vs
   `tft24`); the kinds stay behind flags for the record, nothing adopted. The 12-zone tables in the README are still the 12-month-data LightGBM run.
+- **Full 12-zone runs on 24 months (2026-09-19; README results section, experiments §3).**
+  `results/tft_full` (TFT, monthly refits, 30 min GPU) and `results/default` (trees, 109 min
+  on 14 workers; the 12-month-history trees moved to `results/v2_12mo`). **TFT pooled 4.80 vs
+  isolf_pre 4.85: level (paired daily −0.05 [−0.15, +0.04]), significantly better in CENTRL,
+  HUD VL, NORTH, worse in LONGIL, N.Y.C., WEST; isolf_post better by 0.42.** Trees 5.33
+  (12-month history: 5.56), better than the ISO in CENTRL and NORTH. Headline wording,
+  by the rule: the TFT *matches* NYISO's pre-close forecast, never *beats*; α-bid secondary
+  (signed $ noise; the α-bid does not beat `mean_7_14`). Bands: TFT raw 75% → conformal 77%,
+  trees 57% → 77%. Served path built: `models/tft_data.py` (torch-free), `models/tft_onnx.py`
+  (`OnnxTFT.load` verifies format, `FEATURE_VERSION`, SHA-256), `scripts/export_tft.py`
+  (fit latest window → `data/models/tft/{tft.onnx,tft.json}`, torch-vs-ORT check ≤ 1e-4);
+  `onnxruntime` is in requirements.txt.
   Gotcha: a 12-worker run once died with `BrokenProcessPool` near its end while the
   machine was loaded; re-running the same `--name` resumed from the per-day cache in
   two minutes.
-- **Next action: full 12-zone runs, then Phase 3 with both models.** Run
-  `scripts/run_backtest.py --name default24 --workers 14` (~110 min) and
-  `scripts/run_tft.py --name tft_full --train-zones all` (~40 min, GPU) plus the report
-  scripts on both, then apply the headline rules. Phase 3 serves the ONNX TFT (new:
-  `scripts/export_tft.py` = fit on the laptop → ONNX + scaling constants + version hash,
-  with the torch-vs-ORT check; `onnxruntime` joins requirements.txt; the service loads the
-  file from the data volume and falls back to the trees when it is missing or stale) and
-  the trees (train-on-demand, the demo's retrain button, nightly scheduler). Phase 3
-  itself: backend port: `app/db.py` (zones, load/price tables,
+- **Next action: Phase 3 — backend port serving both models.** The service loads the ONNX
+  bundle from the data volume (`OnnxTFT.load`; `data/models/tft/` locally, uploaded monthly
+  from `scripts/export_tft.py`) and falls back to the trees when it is missing, stale or
+  rejected (feature version / hash); the trees stay train-on-demand (the demo's retrain
+  button, nightly scheduler). Forecast rows carry the model identity (`tft-onnx:<sha12>:
+  <cutoff>` or `lgbm:<FEATURE_VERSION>`) in the version hash. Backend port: `app/db.py` (zones, load/price tables,
   forecasts + values, `schedules`, `forecast_scores` with `imbalance_usd` / `da_cost_usd`,
   alerts), `app/service.py` (ingest via `ArchiveClient` + `resample_slots`, train-on-demand
   via `models.forecast_day` (or the TFT) with the conformal band scaling and the α-bid, versioning hash

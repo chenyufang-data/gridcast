@@ -39,6 +39,20 @@ results/v1_w120/*
 !results/v1_w120/imbalance_pooled.csv
 !results/v1_w120/imbalance_by_zone.csv
 !results/v1_w120/calibration.csv
+!results/v2_12mo/
+results/v2_12mo/*
+!results/v2_12mo/summary.csv
+!results/v2_12mo/baselines_summary.csv
+!results/v2_12mo/imbalance_pooled.csv
+!results/v2_12mo/imbalance_by_zone.csv
+!results/v2_12mo/calibration.csv
+!results/tft_full/
+results/tft_full/*
+!results/tft_full/summary.csv
+!results/tft_full/baselines_summary.csv
+!results/tft_full/imbalance_pooled.csv
+!results/tft_full/imbalance_by_zone.csv
+!results/tft_full/calibration.csv
 *.png
 
 # editors / tooling

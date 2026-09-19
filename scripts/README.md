@@ -22,7 +22,7 @@ Typical sequence:
 ```powershell
 .\.venv\Scripts\python.exe scripts\backfill.py
 .\.venv\Scripts\python.exe scripts\fetch_weather.py
-.\.venv\Scripts\python.exe scripts\run_backtest.py --name default            # ~1.5 h with 14 workers (365-day window)
+.\.venv\Scripts\python.exe scripts\run_backtest.py --name default            # ~110 min with 14 workers (365-day window, 24 months of history)
 .\.venv\Scripts\python.exe scripts\skill_baselines.py --name default
 .\.venv\Scripts\python.exe scripts\imbalance_report.py --name default
 .\.venv\Scripts\python.exe scripts\quantile_calibration.py --name default
