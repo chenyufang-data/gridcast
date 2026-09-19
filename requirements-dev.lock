@@ -41,6 +41,8 @@ cycler==0.12.1
     # via matplotlib
 fastapi==0.141.1
     # via -r requirements.txt
+flatbuffers==25.12.19
+    # via onnxruntime
 fonttools==4.65.0
     # via matplotlib
 h11==0.16.0
@@ -102,6 +104,7 @@ numpy==2.4.6 ; python_full_version < '3.12'
     #   contourpy
     #   lightgbm
     #   matplotlib
+    #   onnxruntime
     #   pandas
     #   pydeck
     #   scikit-learn
@@ -114,6 +117,7 @@ numpy==2.5.3 ; python_full_version >= '3.12'
     #   contourpy
     #   lightgbm
     #   matplotlib
+    #   onnxruntime
     #   pandas
     #   pydeck
     #   scikit-learn
@@ -124,10 +128,13 @@ nvidia-nccl-cu12==2.31.2 ; python_full_version < '3.12' and sys_platform == 'lin
     # via xgboost
 nvidia-nccl-cu13==2.31.2 ; python_full_version >= '3.12' and sys_platform == 'linux'
     # via xgboost
+onnxruntime==1.30.0
+    # via -r requirements.txt
 packaging==26.3
     # via
     #   altair
     #   matplotlib
+    #   onnxruntime
     #   plotly
     #   pytest
     #   streamlit
@@ -147,7 +154,9 @@ plotly==7.1.0
 pluggy==1.6.0
     # via pytest
 protobuf==7.36.1
-    # via streamlit
+    # via
+    #   onnxruntime
+    #   streamlit
 pyarrow==25.0.1
     # via streamlit
 pydantic==2.13.5

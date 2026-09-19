@@ -17,9 +17,11 @@ commit `.env`, a database, or any file fetched from NYISO (see `data/README.md`)
 
 Loose specs live in `requirements*.txt`; exact versions in the matching
 `requirements*.lock`, which is what CI, Docker, and developers install.
-`requirements-research.txt` (torch for `models/tft.py`) is the one exception: it is
-installed by hand from the CUDA index that matches the GPU and has no lock; nothing in
-the images or CI depends on it, and its tests skip when torch is missing. The locks are
+`requirements-research.txt` (torch, onnx, onnxscript: training and exporting the TFT in
+`models/tft.py`) is the one exception: it is installed by hand from the CUDA index that
+matches the GPU and has no lock; nothing in the images or CI depends on it, and its tests
+skip when torch is missing. Serving the exported TFT needs only `onnxruntime`, a normal
+backend dependency (`models/tft_data.py` + `models/tft_onnx.py` import no torch). The locks are
 *universal* (one file for Windows dev, Linux CI, and the images) and consistent with
 each other. After editing a `.txt`, regenerate all three:
 

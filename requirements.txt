@@ -10,3 +10,4 @@ python-multipart>=0.0.9
 requests>=2.31          # app/nyiso.py archive fetch, app/weather.py Open-Meteo
 holidays>=0.50          # US federal + NY holidays (model features, repair exemptions)
 tzdata>=2024.1          # IANA zone database for zoneinfo on Windows images
+onnxruntime>=1.18       # serves the exported TFT (models/tft_onnx.py); the export side needs torch + onnx

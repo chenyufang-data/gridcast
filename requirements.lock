@@ -33,6 +33,10 @@ fastapi==0.141.1
     # via
     #   -c requirements-dev.lock
     #   -r requirements.txt
+flatbuffers==25.12.19
+    # via
+    #   -c requirements-dev.lock
+    #   onnxruntime
 h11==0.16.0
     # via
     #   -c requirements-dev.lock
@@ -68,6 +72,7 @@ numpy==2.4.6 ; python_full_version < '3.12'
     #   -c requirements-dev.lock
     #   -r requirements.txt
     #   lightgbm
+    #   onnxruntime
     #   pandas
     #   scikit-learn
     #   scipy
@@ -76,13 +81,26 @@ numpy==2.5.3 ; python_full_version >= '3.12'
     #   -c requirements-dev.lock
     #   -r requirements.txt
     #   lightgbm
+    #   onnxruntime
     #   pandas
     #   scikit-learn
     #   scipy
+onnxruntime==1.30.0
+    # via
+    #   -c requirements-dev.lock
+    #   -r requirements.txt
+packaging==26.3
+    # via
+    #   -c requirements-dev.lock
+    #   onnxruntime
 pandas==3.0.5
     # via
     #   -c requirements-dev.lock
     #   -r requirements.txt
+protobuf==7.36.1
+    # via
+    #   -c requirements-dev.lock
+    #   onnxruntime
 pydantic==2.13.5
     # via
     #   -c requirements-dev.lock
