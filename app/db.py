@@ -96,6 +96,7 @@ CREATE TABLE IF NOT EXISTS forecasts (
     target_date     TEXT NOT NULL,
     model           TEXT NOT NULL,  -- 'tft-onnx:<sha12>:<fit cutoff>' or 'lgbm:<feature version>'
     model_version   TEXT NOT NULL,  -- hash of the data window, model identity and settings
+    requested       TEXT NOT NULL DEFAULT 'auto',  -- 'auto' = the served model; else an overlay
     cutoff_utc      TEXT NOT NULL,
     created_at      TEXT NOT NULL,
     alpha           REAL NOT NULL,
@@ -210,8 +211,27 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.executescript(_SCHEMA)
+    _migrate(conn)
     _seed_zones(conn)
     return conn
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Bring a store from an earlier schema up to date (idempotent, one statement each).
+
+    ``forecasts.requested`` (2026-09-20): every version used to count as the day's forecast
+    and the newest won. Older rows become ``auto``, except a tree version stored after an
+    earlier version of the same day, which can only have been a manual retrain.
+    """
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(forecasts)")}
+    if "requested" not in cols:
+        conn.execute("ALTER TABLE forecasts ADD COLUMN requested TEXT NOT NULL DEFAULT 'auto'")
+        conn.execute(
+            "UPDATE forecasts SET requested = 'lgbm' WHERE model LIKE 'lgbm:%' AND id <> "
+            "(SELECT MIN(f2.id) FROM forecasts f2 WHERE f2.zone = forecasts.zone "
+            "AND f2.target_date = forecasts.target_date)"
+        )
+        conn.commit()
 
 
 def _seed_zones(conn: sqlite3.Connection) -> None:

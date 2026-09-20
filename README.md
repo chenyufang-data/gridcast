@@ -166,7 +166,9 @@ and the view and shows which model is serving; the chat guide sits behind a floa
 bubble at the bottom right; the page is one of six views: **Overview** (zone cards: 7-day MAPE and dollars next to
 NYISO's own forecast, alerts), **Forecast** (median, P10–P90, α-bid, NYISO overlay,
 actuals; buttons to forecast the next bid day with the served model or retrain the
-trees live), **DAM Schedule** (start from the α-bid or the median, scale, edit any hour,
+trees live; a day keeps every version: the served model's forecast is the primary that
+the cards and scores count, a retrain is drawn as an extra line on the same chart and
+scored on the same actuals, a click on a legend entry hides any line), **DAM Schedule** (start from the α-bid or the median, scale, edit any hour,
 see the $ at risk and the hours outside the band, save, export CSV, and later the
 schedule's own score), **Forecast vs Actual** (MAPE and dollars per hour, backfill
 missing days), **Prices** (DA vs RT, the spread, α and its costs) and **Load**.

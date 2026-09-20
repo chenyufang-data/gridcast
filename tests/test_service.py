@@ -403,7 +403,50 @@ def test_served_tft_and_fallbacks(client: TestClient, tmp_path: Path) -> None:
     vals = pd.DataFrame(fc["values"])
     assert len(vals) == 96 and (vals["p10"] <= vals["predicted"]).all()
     latest = client.get(f"/zones/nyc/forecasts/{TARGET}").json()
-    assert latest["model"] == fc["model"]  # the newest version is served
+    assert latest["model"] == fc["model"]  # the newest served version is the primary
+
+    # a day keeps every version: the served model's is the primary, a retrain an overlay
+    served = client.post(
+        "/zones/west/forecasts", params={"target_date": TARGET.isoformat()}, headers=TOKEN
+    ).json()
+    assert served["model"].startswith("tft-onnx:") and served["primary"] is True
+    retrain = client.post(
+        "/zones/west/forecasts",
+        params={"target_date": TARGET.isoformat(), "model": "lgbm"},
+        headers=TOKEN,
+    ).json()
+    assert retrain["model"].startswith("lgbm:") and retrain["new"] is True
+    assert retrain["requested"] == "lgbm" and retrain["primary"] is False
+    day = client.get(f"/zones/west/forecasts/{TARGET}").json()
+    assert day["model"] == served["model"] and day["primary"] is True
+    assert [v["primary"] for v in day["versions"]] == [True, False]
+    other = client.get(
+        f"/zones/west/forecasts/{TARGET}", params={"version": retrain["model_version"]}
+    ).json()
+    assert other["model"] == retrain["model"] and other["primary"] is False
+    assert other["values"][40]["predicted"] != day["values"][40]["predicted"]
+    r = client.get(f"/zones/west/forecasts/{TARGET}", params={"version": "nope"})
+    assert r.status_code == 404
+    listed = {f["target_date"]: f for f in client.get("/zones/west/forecasts").json()}
+    assert listed[TARGET.isoformat()]["n_versions"] == 2
+    assert listed[TARGET.isoformat()]["model"] == served["model"]
+    # both versions are scored; the cards, history and compare view count the primary
+    client.post("/admin/score", params={"zone": "west"}, headers=TOKEN)
+    day = client.get(f"/zones/west/forecasts/{TARGET}").json()
+    assert all(v["mape_hour"] is not None for v in day["versions"])
+    hist = [s for s in client.get("/zones/west/scores").json() if s["target_date"] == str(TARGET)]
+    assert len(hist) == 1 and hist[0]["model"] == served["model"]
+    cmp = client.get(
+        "/zones/west/compare", params={"start": str(TARGET), "end": str(TARGET)}
+    ).json()
+    assert cmp["summary"]["models"] == [served["model"]]
+    client.post(
+        "/zones/west/schedules",
+        json={"target_date": TARGET.isoformat(), "hourly_mw": [1500.0] * 24},
+        headers=TOKEN,
+    )
+    sched = client.get(f"/zones/west/schedules/{TARGET}").json()
+    assert sched["model_version"] == served["model_version"]  # pinned to the primary
 
     # a zone outside the bundle and a stale bundle both fall back to the trees
     capitl = client.post(
@@ -474,3 +517,34 @@ def test_jobs_and_retention(client: TestClient) -> None:
 
 def jobs_now(client: TestClient) -> list[dict[str, Any]]:
     return client.get("/jobs").json()["runs"]
+
+
+def test_requested_column_migration(tmp_path: Path) -> None:
+    """A store from before `forecasts.requested`: rows become auto, later retrains lgbm."""
+    import sqlite3
+
+    if sqlite3.sqlite_version_info < (3, 35):
+        pytest.skip("DROP COLUMN needs SQLite 3.35")
+    path = tmp_path / "old.db"
+    conn = db.connect(path)
+    conn.execute("ALTER TABLE forecasts DROP COLUMN requested")
+    rows = [
+        ("N.Y.C.", "2025-09-10", "tft-onnx:abc:x", "v1", "2025-09-09 09:05:00"),
+        ("N.Y.C.", "2025-09-10", "lgbm:nyiso-fv1", "v2", "2025-09-11 03:00:00"),  # a retrain
+        ("WEST", "2025-09-10", "lgbm:nyiso-fv1", "v3", "2025-09-09 09:05:00"),  # a fallback day
+    ]
+    conn.executemany(
+        "INSERT INTO forecasts (zone, target_date, model, model_version, cutoff_utc, "
+        "created_at, alpha) VALUES (?, ?, ?, ?, '2025-09-09 09:00:00', ?, 0.5)",
+        rows,
+    )
+    conn.commit()
+    conn.close()
+    conn = db.connect(path)
+    try:
+        got = {r[0]: r[1] for r in conn.execute("SELECT model_version, requested FROM forecasts")}
+        assert got == {"v1": "auto", "v2": "lgbm", "v3": "auto"}
+        primary = service.primary_forecast(conn, "N.Y.C.", date(2025, 9, 10))
+        assert primary is not None and primary["model_version"] == "v1"
+    finally:
+        conn.close()

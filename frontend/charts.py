@@ -11,6 +11,8 @@ one unified crosshair tooltip, and every chart ships a table twin in the app.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -31,6 +33,9 @@ GRID = "#e1e0d9"
 AXIS = "#c3c2b7"
 BAND_FILL = "rgba(42,120,214,0.12)"
 AREA_FILL = "rgba(235,104,52,0.10)"
+# Other versions of the same day (a live retrain, an older bundle) take the next
+# categorical slots in creation order, so a version keeps its hue whatever is toggled.
+OVERLAY_COLORS = ("#e87ba4", "#008300", "#4a3aa7")  # slots 5-7: magenta, green, violet
 
 CONFIG = {"displayModeBar": False, "responsive": True}
 
@@ -106,15 +111,22 @@ def forecast_figure(
     show_actual: bool = True,
     show_iso: bool = True,
     show_alpha: bool = True,
+    overlays: Sequence[tuple[str, pd.DataFrame, str]] | None = None,
     height: int = 420,
 ) -> go.Figure:
-    """Median + P10-P90 band, alpha-bid, ISO forecast and actual load, one MW axis."""
+    """Median + P10-P90 band, alpha-bid, ISO forecast and actual load, one MW axis.
+
+    `overlays` are other versions of the same day as ``(legend name, frame, color)``: one
+    median line each, no band. Clicking a legend entry hides that series (Plotly default).
+    """
     fig = go.Figure()
     if {"p10", "p90"} <= set(df.columns):
         fig.add_traces(_band(df[x], df["p10"], df["p90"], "P10–P90 band"))
     fig.add_trace(_line(df[x], df["predicted"], "Forecast (median)", FORECAST))
     if show_alpha and "p_alpha" in df.columns and not df["p_alpha"].equals(df["predicted"]):
         fig.add_trace(_line(df[x], df["p_alpha"], "α-bid", FORECAST, dash="dot"))
+    for name, frame, color in overlays or ():
+        fig.add_trace(_line(frame[x], frame["predicted"], name, color))
     if show_iso and "isolf_pre" in df.columns and df["isolf_pre"].notna().any():
         fig.add_trace(_line(df[x], df["isolf_pre"], "NYISO pre-close forecast", ISO))
     if show_actual and "actual" in df.columns and df["actual"].notna().any():

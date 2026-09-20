@@ -52,7 +52,9 @@ class FakeApi(api.Api):
     def __init__(self) -> None:
         super().__init__("http://fake", "tok")
         self.writes: list[tuple[str, Any]] = []
+        self.reads: list[tuple[str, str, str | None]] = []  # forecast reads (zone, day, version)
         self.stored = {"N.Y.C.": {TARGET.isoformat()}, "LONGIL": {TARGET.isoformat()}}
+        self.extra: dict[tuple[str, str], list[str]] = {}  # retrains per (zone, day)
 
     def request(self, method: str, path: str, timeout: float | None = None, **kwargs: Any) -> Any:
         raise AssertionError(f"unexpected raw request {method} {path}")
@@ -87,16 +89,27 @@ class FakeApi(api.Api):
     def forecasts(self, zone: str, limit: int = 400) -> list[dict[str, Any]]:
         return [{"forecast_id": 1, "target_date": d, "model": "tft-onnx:e979ee4c9f6d:x", "model_version": "abc", "created_at": "x", "alpha": 0.43, "coverage": 1.0, "mape_hour": 3.5, "imbalance_usd": 900.0, "isolf_mape_hour": 3.9} for d in sorted(self.stored.get(zone, ()), reverse=True)]  # fmt: skip
 
-    def forecast(self, zone: str, target: date | str) -> dict[str, Any]:
+    def forecast(self, zone: str, target: date | str, version: str | None = None) -> dict[str, Any]:
         t = str(target)
+        self.reads.append((zone, t, version))
         if t not in self.stored.get(zone, ()):
             raise api.ApiError(404, "no forecast")
+        extras = self.extra.get((zone, t), [])
+        if version and version not in extras:
+            raise api.ApiError(404, "no version")
+        versions = [
+            {"forecast_id": 1, "model": "tft-onnx:e979ee4c9f6d:x", "model_version": "abc", "requested": "auto", "created_at": "2026-09-18 08:30:00", "alpha": 0.43, "primary": True, "coverage": 1.0, "mape_hour": 3.5, "band_coverage": 78.0, "imbalance_usd": 900.0, "imbalance_alpha_usd": 850.0, "isolf_mape_hour": 3.9, "isolf_imbalance_usd": 1100.0},
+            *({"forecast_id": 2 + k, "model": "lgbm:nyiso-fv1", "model_version": v, "requested": "lgbm", "created_at": "2026-09-20 03:05:00", "alpha": 0.43, "primary": False, "coverage": None, "mape_hour": None, "band_coverage": None, "imbalance_usd": None, "imbalance_alpha_usd": None, "isolf_mape_hour": None, "isolf_imbalance_usd": None} for k, v in enumerate(extras)),
+        ]  # fmt: skip
+        base = 6000.0 if zone == "N.Y.C." else 2300.0
         return {
-            "forecast_id": 1, "zone": zone, "target_date": t, "model": "tft-onnx:e979ee4c9f6d:x",
-            "model_version": "abc", "cutoff_utc": "2026-09-18 09:00:00", "created_at": "2026-09-18 08:30:00",
+            "forecast_id": 1, "zone": zone, "target_date": t, "model": "tft-onnx:e979ee4c9f6d:x" if not version else "lgbm:nyiso-fv1",
+            "model_version": version or "abc", "requested": "lgbm" if version else "auto", "primary": not version,
+            "cutoff_utc": "2026-09-18 09:00:00", "created_at": "2026-09-18 08:30:00",
             "alpha": 0.43, "band_scale_p10": 0.98, "band_scale_p90": 1.03, "history_start": "x", "history_end": "y", "weather": 1,
+            "versions": versions,
             "score": {"coverage": 1.0, "mape_hour": 3.5, "mape_slot": 4.0, "mape_hour_alpha": 3.6, "band_coverage": 78.0, "imbalance_usd": 900.0, "imbalance_alpha_usd": 850.0, "da_cost_usd": 1e6, "isolf_mape_hour": 3.9, "isolf_imbalance_usd": 1100.0},
-            "values": _slots(date.fromisoformat(t), 6000.0 if zone == "N.Y.C." else 2300.0),
+            "values": _slots(date.fromisoformat(t), base * (0.97 if version else 1.0)),
         }  # fmt: skip
 
     def create_forecast(
@@ -104,8 +117,12 @@ class FakeApi(api.Api):
     ) -> dict[str, Any]:
         t = str(target or "2026-09-21")
         self.writes.append(("forecast", (zone, t, model)))
+        primary = True
+        if model == "lgbm" and t in self.stored.get(zone, ()):
+            self.extra.setdefault((zone, t), []).append("def")  # a retrain on a stored day
+            primary = False
         self.stored.setdefault(zone, set()).add(t)
-        return {"forecast_id": 2, "zone": zone, "target_date": t, "model": "lgbm:nyiso-fv1" if model == "lgbm" else "tft-onnx:e979ee4c9f6d:x", "model_version": "def", "new": True, "fallback_reason": None, "values": []}  # fmt: skip
+        return {"forecast_id": 2, "zone": zone, "target_date": t, "model": "lgbm:nyiso-fv1" if model == "lgbm" else "tft-onnx:e979ee4c9f6d:x", "model_version": "def" if not primary else "abc", "requested": model, "primary": primary, "new": True, "fallback_reason": None, "values": []}  # fmt: skip
 
     def scores(self, zone: str, limit: int = 400) -> list[dict[str, Any]]:
         return [{"target_date": (TARGET - timedelta(days=k)).isoformat(), "model": "tft-onnx:e979ee4c9f6d:x", "mape_hour": 3.0 + k / 10, "isolf_mape_hour": 3.5, "imbalance_usd": 500.0, "isolf_imbalance_usd": 600.0, "band_coverage": 77.0} for k in range(5)]  # fmt: skip
@@ -229,7 +246,16 @@ def test_forecast_view_actions(fake: FakeApi) -> None:
     at.button[1].click().run()  # retrain the trees for the selected day
     assert not at.exception
     assert fake.writes[-1] == ("forecast", ("N.Y.C.", "2026-09-21", "lgbm"))
-    assert any("Already stored" in s.value or "Stored" in s.value for s in at.success)
+    assert any("extra version" in s.value for s in at.success)
+    # the retrain is an extra version: drawn next to the primary, listed, and toggleable
+    pills = at.pills(key="fc_versions_N.Y.C._2026-09-21_2")
+    assert len(pills.options) == 1 and "Trees" in pills.options[0]
+    assert fake.reads[-1] == ("N.Y.C.", "2026-09-21", "def")  # the overlay was fetched
+    assert any("Every version of this day" in m.value for m in at.markdown)
+    assert any("primary of 2 versions" in m.value for m in at.markdown)
+    pills.set_value([]).run()
+    assert not at.exception
+    assert fake.reads[-1] == ("N.Y.C.", "2026-09-21", None)  # deselected: primary only
 
 
 def test_schedule_view_saves_a_bid(fake: FakeApi) -> None:

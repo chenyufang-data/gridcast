@@ -520,23 +520,29 @@ def generate_forecast(zone: str, target: date | None = None, model: str = "auto"
             )
             version = hashlib.sha1(key.encode()).hexdigest()[:12]
             existing = conn.execute(
-                "SELECT id, created_at FROM forecasts "
+                "SELECT id, created_at, requested FROM forecasts "
                 "WHERE zone=? AND target_date=? AND model_version=?",
                 (zone, target.isoformat(), version),
             ).fetchone()
             if existing:
                 fid, created_at, is_new = existing["id"], existing["created_at"], False
+                if model == "auto" and existing["requested"] != "auto":
+                    # the served model reproduced a manual version: it is the day's forecast
+                    conn.execute("UPDATE forecasts SET requested='auto' WHERE id=?", (fid,))
+                    conn.commit()
             else:
                 created_at, is_new = db.now_text(), True
                 cur = conn.execute(
-                    "INSERT INTO forecasts (zone, target_date, model, model_version, cutoff_utc, "
-                    "created_at, alpha, band_scale_p10, band_scale_p90, history_start, "
-                    "history_end, weather) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO forecasts (zone, target_date, model, model_version, requested, "
+                    "cutoff_utc, created_at, alpha, band_scale_p10, band_scale_p90, "
+                    "history_start, history_end, weather) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         zone,
                         target.isoformat(),
                         identity,
                         version,
+                        model,
                         db.ts_text(cutoff),
                         created_at,
                         float(alpha),
@@ -567,13 +573,16 @@ def generate_forecast(zone: str, target: date | None = None, model: str = "auto"
                     ],
                 )
                 conn.commit()
+            primary = primary_forecast(conn, zone, target)
+            is_primary = primary is not None and primary["id"] == fid
             log.info(
-                "forecast %s %s: %s v%s (%s), alpha %.3f, band x%.3f/%.3f",
+                "forecast %s %s: %s v%s (%s, %s), alpha %.3f, band x%.3f/%.3f",
                 zone,
                 target,
                 identity,
                 version,
                 "new" if is_new else "existing",
+                "primary" if is_primary else "overlay",
                 alpha,
                 s10,
                 s90,
@@ -586,6 +595,8 @@ def generate_forecast(zone: str, target: date | None = None, model: str = "auto"
         "target_date": target.isoformat(),
         "model": identity,
         "model_version": version,
+        "requested": model,
+        "primary": is_primary,
         "created_at": created_at,
         "new": is_new,
         "cutoff_utc": cutoff.isoformat(),
@@ -645,31 +656,38 @@ def forecast_all(target: date | None = None, model: str = "auto") -> list[dict[s
 
 
 # ─── retrieval ────────────────────────────────────────────────────────────────────────
-_LATEST = (
+# A day can hold several versions (the served model's forecast, a live retrain, a refit
+# bundle). The *primary* one counts for the cards, the compare view, scores and schedules:
+# the newest version the served model produced (``requested = 'auto'``), else the newest
+# of all. Every other version is an overlay: kept, scored, shown on request.
+_PRIMARY_ORDER = "ORDER BY (f2.requested = 'auto') DESC, f2.created_at DESC, f2.id DESC LIMIT 1"
+_PRIMARY = (
     "f.id = (SELECT f2.id FROM forecasts f2 WHERE f2.zone = f.zone "
-    "AND f2.target_date = f.target_date ORDER BY f2.created_at DESC, f2.id DESC LIMIT 1)"
+    f"AND f2.target_date = f.target_date {_PRIMARY_ORDER})"
 )
 
 
-def latest_forecast(conn: sqlite3.Connection, zone: str, target: date) -> sqlite3.Row | None:
+def primary_forecast(conn: sqlite3.Connection, zone: str, target: date) -> sqlite3.Row | None:
     return conn.execute(
-        "SELECT * FROM forecasts WHERE zone=? AND target_date=? "
-        "ORDER BY created_at DESC, id DESC LIMIT 1",
+        f"SELECT * FROM forecasts f2 WHERE zone=? AND target_date=? {_PRIMARY_ORDER}",
         (zone, target.isoformat()),
     ).fetchone()
 
 
 def list_forecasts(zone: str, limit: int = 400) -> list[dict[str, Any]]:
-    """Latest version per target date (newest first) with its score, if any."""
+    """The primary version per target date (newest day first) with its score, if any."""
     zone = resolve_zone(zone)
     conn = db.connect()
     try:
         rows = conn.execute(
             f"""
-            SELECT f.id AS forecast_id, f.target_date, f.model, f.model_version, f.created_at,
-                   f.alpha, s.coverage, s.mape_hour, s.imbalance_usd, s.isolf_mape_hour
+            SELECT f.id AS forecast_id, f.target_date, f.model, f.model_version, f.requested,
+                   f.created_at, f.alpha, s.coverage, s.mape_hour, s.imbalance_usd,
+                   s.isolf_mape_hour,
+                   (SELECT COUNT(*) FROM forecasts f3 WHERE f3.zone = f.zone
+                    AND f3.target_date = f.target_date) AS n_versions
             FROM forecasts f LEFT JOIN forecast_scores s ON s.forecast_id = f.id
-            WHERE f.zone = ? AND {_LATEST}
+            WHERE f.zone = ? AND {_PRIMARY}
             ORDER BY f.target_date DESC LIMIT ?
             """,
             (zone, limit),
@@ -677,6 +695,26 @@ def list_forecasts(zone: str, limit: int = 400) -> list[dict[str, Any]]:
         return [dict(r) for r in rows]
     finally:
         conn.close()
+
+
+def forecast_versions(conn: sqlite3.Connection, zone: str, target: date) -> list[dict[str, Any]]:
+    """Every stored version of a day, oldest first, with its score summary and primary flag."""
+    rows = conn.execute(
+        f"""
+        SELECT f.id AS forecast_id, f.model, f.model_version, f.requested, f.created_at,
+               f.alpha, ({_PRIMARY}) AS is_primary, s.coverage, s.mape_hour, s.band_coverage,
+               s.imbalance_usd, s.imbalance_alpha_usd, s.isolf_mape_hour, s.isolf_imbalance_usd
+        FROM forecasts f LEFT JOIN forecast_scores s ON s.forecast_id = f.id
+        WHERE f.zone = ? AND f.target_date = ? ORDER BY f.created_at, f.id
+        """,
+        (zone, target.isoformat()),
+    ).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["primary"] = bool(d.pop("is_primary"))
+        out.append(d)
+    return out
 
 
 def _forecast_values(conn: sqlite3.Connection, forecast_id: int) -> pd.DataFrame:
@@ -711,14 +749,24 @@ def _to_slots(hourly: pd.DataFrame, value: str, slots: pd.Series) -> np.ndarray:
     return table.reindex(slots.dt.floor("h")).to_numpy(dtype=float)
 
 
-def get_forecast(zone: str, target: date) -> dict[str, Any]:
-    """Latest stored forecast for a day with the ISO overlay and actuals where they exist."""
+def get_forecast(zone: str, target: date, version: str | None = None) -> dict[str, Any]:
+    """A day's primary forecast (or the version asked for) with the ISO overlay, the
+    actuals where they exist, and the list of every version stored for that day."""
     zone = resolve_zone(zone)
     conn = db.connect()
     try:
-        f = latest_forecast(conn, zone, target)
-        if f is None:
-            raise LookupError(f"no forecast stored for {zone} on {target}")
+        if version:
+            f = conn.execute(
+                "SELECT * FROM forecasts WHERE zone=? AND target_date=? AND model_version=?",
+                (zone, target.isoformat(), version),
+            ).fetchone()
+            if f is None:
+                raise LookupError(f"no version {version} stored for {zone} on {target}")
+        else:
+            f = primary_forecast(conn, zone, target)
+            if f is None:
+                raise LookupError(f"no forecast stored for {zone} on {target}")
+        versions = forecast_versions(conn, zone, target)
         vals = _forecast_values(conn, f["id"])
         vals = vals.rename(columns={"predicted": "pred"})
         lo, hi = vals["ts_utc"].min(), vals["ts_utc"].max()
@@ -739,6 +787,8 @@ def get_forecast(zone: str, target: date) -> dict[str, Any]:
         ).fetchone()
         out = dict(f)
         out["forecast_id"] = out.pop("id")
+        out["primary"] = any(v["primary"] and v["forecast_id"] == f["id"] for v in versions)
+        out["versions"] = versions
         out["score"] = dict(score) if score else None
         out["values"] = [
             {
@@ -935,7 +985,7 @@ def _refresh_alerts(conn: sqlite3.Connection, score: dict[str, Any]) -> list[dic
         hist = conn.execute(
             f"""
             SELECT s.imbalance_usd FROM forecast_scores s JOIN forecasts f ON f.id = s.forecast_id
-            WHERE f.zone = ? AND f.target_date < ? AND f.target_date >= ? AND {_LATEST}
+            WHERE f.zone = ? AND f.target_date < ? AND f.target_date >= ? AND {_PRIMARY}
               AND s.imbalance_usd IS NOT NULL AND s.coverage >= ?
             """,
             (
@@ -968,7 +1018,11 @@ def _refresh_alerts(conn: sqlite3.Connection, score: dict[str, Any]) -> list[dic
 
 
 def score_pending(zone: str | None = None, today: date | None = None) -> dict[str, Any]:
-    """Score every latest forecast and schedule that actuals now cover better than before."""
+    """Score every forecast version and schedule that actuals now cover better than before.
+
+    Overlays are scored like the primary so a live retrain gets its own number the next
+    morning; only the primary version raises alerts.
+    """
     today = today or TODAY()
     lo = (today - timedelta(days=SCORE_WINDOW_DAYS)).isoformat()
     hi = (today - timedelta(days=1)).isoformat()
@@ -977,11 +1031,11 @@ def score_pending(zone: str | None = None, today: date | None = None) -> dict[st
     try:
         rows = conn.execute(
             f"""
-            SELECT f.id, s.coverage AS prev FROM forecasts f
+            SELECT f.id, s.coverage AS prev, ({_PRIMARY}) AS is_primary FROM forecasts f
             LEFT JOIN forecast_scores s ON s.forecast_id = f.id
-            WHERE f.target_date BETWEEN ? AND ? {zone_sql} AND {_LATEST}
+            WHERE f.target_date BETWEEN ? AND ? {zone_sql}
               AND (s.forecast_id IS NULL OR s.coverage < 1.0)
-            ORDER BY f.zone, f.target_date
+            ORDER BY f.zone, f.target_date, f.id
             """,
             [lo, hi, *params],
         ).fetchall()
@@ -989,8 +1043,10 @@ def score_pending(zone: str | None = None, today: date | None = None) -> dict[st
         for r in rows:
             score = score_forecast(conn, r["id"])
             if score is not None and score["coverage"] != r["prev"]:
+                score["primary"] = bool(r["is_primary"])
                 scores.append(score)
-                alerts.extend(_refresh_alerts(conn, score))
+                if score["primary"]:
+                    alerts.extend(_refresh_alerts(conn, score))
         srows = conn.execute(
             f"""
             SELECT d.id, ss.coverage AS prev FROM schedules d
@@ -1016,7 +1072,7 @@ def list_scores(zone: str, limit: int = 400) -> list[dict[str, Any]]:
             f"""
             SELECT f.target_date, f.model, f.model_version, s.*
             FROM forecast_scores s JOIN forecasts f ON f.id = s.forecast_id
-            WHERE f.zone = ? AND {_LATEST} ORDER BY f.target_date DESC LIMIT ?
+            WHERE f.zone = ? AND {_PRIMARY} ORDER BY f.target_date DESC LIMIT ?
             """,
             (zone, limit),
         ).fetchall()
@@ -1055,7 +1111,8 @@ def zone_cards(today: date | None = None) -> list[dict[str, Any]]:
             ).fetchone()
             latest = conn.execute(
                 "SELECT target_date, model, model_version, created_at FROM forecasts "
-                "WHERE zone=? ORDER BY target_date DESC, created_at DESC, id DESC LIMIT 1",
+                "WHERE zone=? ORDER BY target_date DESC, (requested = 'auto') DESC, "
+                "created_at DESC, id DESC LIMIT 1",
                 (zone,),
             ).fetchone()
             recent = conn.execute(
@@ -1065,7 +1122,7 @@ def zone_cards(today: date | None = None) -> list[dict[str, Any]]:
                        SUM(s.isolf_imbalance_usd) AS isolf_imbalance_usd,
                        AVG(s.band_coverage) AS band_coverage
                 FROM forecast_scores s JOIN forecasts f ON f.id = s.forecast_id
-                WHERE f.zone = ? AND f.target_date >= ? AND s.coverage >= ? AND {_LATEST}
+                WHERE f.zone = ? AND f.target_date >= ? AND s.coverage >= ? AND {_PRIMARY}
                 """,
                 (zone, week, SCORE_MIN_COVERAGE),
             ).fetchone()
@@ -1111,7 +1168,7 @@ def _latest_values_between(
         f"""
         SELECT f.target_date, f.model, v.ts_utc, v.predicted, v.p10, v.p90, v.p_alpha
         FROM forecasts f JOIN forecast_values v ON v.forecast_id = f.id
-        WHERE f.zone = ? AND f.target_date BETWEEN ? AND ? AND {_LATEST}
+        WHERE f.zone = ? AND f.target_date BETWEEN ? AND ? AND {_PRIMARY}
         ORDER BY v.ts_utc
         """,
         (zone, start.isoformat(), end.isoformat()),
@@ -1378,7 +1435,7 @@ def create_schedule(
     zone = resolve_zone(zone)
     conn = db.connect()
     try:
-        f = latest_forecast(conn, zone, target)
+        f = primary_forecast(conn, zone, target)
         if f is None:
             raise LookupError(f"no forecast stored for {zone} on {target}; generate one first")
         vals = _forecast_values(conn, f["id"])

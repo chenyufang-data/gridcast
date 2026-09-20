@@ -464,6 +464,35 @@ def _forecast_frame(fc: dict[str, Any], granularity: str) -> pd.DataFrame:
     return _hourly(df, cols) if granularity == "hour" else df[["ts", *cols]]
 
 
+def _version_label(v: dict[str, Any]) -> str:
+    """One legend/pill name per stored version: model kind, hash and time made."""
+    return f"{model_kind(v['model'])} · {v['model_version'][:8]} · {v['created_at'][:16]} UTC"
+
+
+def _version_role(v: dict[str, Any]) -> str:
+    if v["primary"]:
+        return "primary (served model)"
+    if v.get("requested") == "auto":
+        return "earlier served version"
+    return f"manual ({v.get('requested') or 'unknown'})"
+
+
+def _versions_table(versions: list[dict[str, Any]]) -> pd.DataFrame:
+    rows = [
+        {
+            "Version": _version_label(v),
+            "Role": _version_role(v),
+            "Hourly MAPE %": v.get("mape_hour"),
+            "NYISO MAPE %": v.get("isolf_mape_hour"),
+            "Imbalance $": v.get("imbalance_usd"),
+            "α-bid $": v.get("imbalance_alpha_usd"),
+            "Inside band %": v.get("band_coverage"),
+        }
+        for v in versions
+    ]
+    return pd.DataFrame(rows).round(2)
+
+
 def _run_forecast(zone: str, target: date | None, model: str, label: str) -> None:
     with st.spinner(f"{label}…"):
         try:
@@ -472,10 +501,15 @@ def _run_forecast(zone: str, target: date | None, model: str, label: str) -> Non
             st.session_state.flash = ("error", f"Forecast failed: {exc.detail}")
         else:
             why = f" ({fc['fallback_reason']})" if fc.get("fallback_reason") else ""
+            role = (
+                ""
+                if fc.get("primary", True)
+                else " as an extra version: the served model's forecast stays the day's primary"
+            )
             st.session_state.flash = (
                 "success",
                 f"{'Stored' if fc['new'] else 'Already stored'}: {fc['target_date']} with "
-                f"{model_kind(fc['model'])}{why}, version {fc['model_version']}.",
+                f"{model_kind(fc['model'])}{why}, version {fc['model_version']}{role}.",
             )
             st.session_state.target = date.fromisoformat(fc["target_date"])
     zones_cached.clear()
@@ -555,10 +589,34 @@ def render_forecast(zone: str, health: dict[str, Any]) -> None:
             _run_forecast(zone, ss.target, "auto", "Forecasting")
         return
     fc = api.client().forecast(zone, ss.target)
-    df = _forecast_frame(fc, "slot" if ss.granularity == "slot" else "hour")
-    st.plotly_chart(charts.forecast_figure(df), width="stretch", config=charts.CONFIG)
+    gran = "slot" if ss.granularity == "slot" else "hour"
+    df = _forecast_frame(fc, gran)
+    versions = fc.get("versions") or []
+    others = [v for v in versions if not v["primary"]]
+    overlays: list[tuple[str, pd.DataFrame, str]] = []
+    if others:
+        labels = {_version_label(v): v for v in others}
+        chosen = st.pills(
+            "Also show",
+            list(labels),
+            selection_mode="multi",
+            default=list(labels),
+            key=f"fc_versions_{zone}_{ss.target}_{len(versions)}",
+            help="Other versions stored for this day (a live retrain, an older bundle). The "
+            "blue line is the day's primary: the served model's forecast. Click a legend "
+            "entry to hide a line.",
+        )
+        for i, (label, v) in enumerate(labels.items()):
+            if label in (chosen or []):
+                extra = api.client().forecast(zone, ss.target, version=v["model_version"])
+                color = charts.OVERLAY_COLORS[i % len(charts.OVERLAY_COLORS)]
+                overlays.append((label, _forecast_frame(extra, gran), color))
+    st.plotly_chart(
+        charts.forecast_figure(df, overlays=overlays), width="stretch", config=charts.CONFIG
+    )
+    more = f" · primary of {len(versions)} versions" if len(versions) > 1 else ""
     st.markdown(
-        f"{model_badge(fc['model'])} version `{fc['model_version']}` · made "
+        f"{model_badge(fc['model'])} version `{fc['model_version']}`{more} · made "
         f"{fc['created_at']} UTC as of the {fc['cutoff_utc'][:16]} UTC cutoff · "
         f"α = {fc['alpha']:.2f} · band scale ×{fc['band_scale_p10']:.2f} / "
         f"×{fc['band_scale_p90']:.2f} · peak {fmt_mw(df['predicted'].max())}"
@@ -567,8 +625,18 @@ def render_forecast(zone: str, health: dict[str, Any]) -> None:
         _score_row(fc["score"])
     else:
         st.caption("Not scored yet: actual load and prices arrive the next morning.")
+    if len(versions) > 1:
+        st.markdown("**Every version of this day** · scored on the same actuals")
+        st.dataframe(_versions_table(versions), width="stretch", hide_index=True)
+    table = df
+    for label, frame, _ in overlays:
+        table = table.merge(
+            frame[["ts", "predicted"]].rename(columns={"predicted": f"predicted · {label}"}),
+            on="ts",
+            how="left",
+        )
     with st.expander("Table view"):
-        st.dataframe(df.round(1), width="stretch", hide_index=True)
+        st.dataframe(table.round(1), width="stretch", hide_index=True)
     scores = api.client().scores(zone, limit=30)
     if scores:
         with st.expander(f"Accuracy history · last {len(scores)} scored days"):

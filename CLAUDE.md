@@ -98,7 +98,12 @@ lock file, logging, type hints, LICENSE, data provenance, year-proof holidays).
   `src.settlement`; split-conformal band scales from the trailing 30 scored days of the same
   model family; immutable forecasts versioned by a hash of data window + model identity +
   settings, `model` = `tft-onnx:<sha12>:<fit cutoff>` or `lgbm:nyiso-fv1`; `auto` = TFT when
-  valid else trees with `fallback_reason`; scoring on complete UTC hours and per-slot
+  valid else trees with `fallback_reason`; **a day keeps every version** (2026-09-20, after
+  a live retrain hid the TFT curve): `forecasts.requested` (`auto` | `tft` | `lgbm`, added by
+  a migration in `db.connect`, older retrains inferred) picks the *primary* = newest `auto`
+  version, else the newest; cards, compare, score history, alerts and schedules count the
+  primary, every version is scored, `GET …/forecasts/{day}?version=` reads another one and
+  the day payload lists `versions`; scoring on complete UTC hours and per-slot
   settlement of the hourly-mean bid; alerts (MAPE > 10 %, imbalance $ above the trailing P90
   after 10 scored days); zone cards; compare / load / prices / isolf / alpha views; DAM
   schedules = one flat MW bid per hour pinned to the latest forecast, `usd_at_risk` guardrail;
@@ -142,7 +147,11 @@ lock file, logging, type hints, LICENSE, data provenance, year-proof holidays).
   chat_open` keeps it open across reruns, `on_dismiss` clears it, a navigating reply
   closes it and toasts, an answer reruns the fragment, the box locks with a notice when
   the daily limit is hit (2026-09-20, the user asked for it after seeing the chips
-  duplicate the sidebar); `?guide=open` opens it on load; page = Overview cards / Forecast / DAM Schedule (data editor, α-bid or median
+  duplicate the sidebar); `?guide=open` opens it on load; page = Overview cards / Forecast
+  (other versions of the day as overlay lines in palette slots 5–7, "Also show" pills, a
+  per-version score table; note the 04:30 ET job makes a *new* served version of tomorrow
+  whenever today's partial load changed the data window, so a day often holds two `auto`
+  versions and the newest is the primary) / DAM Schedule (data editor, α-bid or median
   start, scale %, $ at risk, hours outside the band, save, CSV, history) / Forecast vs
   Actual (backfill button) / Prices / Load; every chart has a table expander; widget
   state pattern: state keys are the truth, each widget is seeded right before creation

@@ -255,7 +255,9 @@ def create_forecast(
     """Forecast a day as of its D-1 05:00 ET cutoff and store it.
 
     ``auto`` serves the ONNX TFT when the bundle is valid and falls back to the trees;
-    ``lgbm`` retrains the trees on demand (the demo's retrain button).
+    ``lgbm`` retrains the trees on demand (the demo's retrain button). Versions are
+    immutable and a day keeps every one: the served model's is the day's primary, an
+    explicit model is stored as an overlay (`primary` says which this one is).
     """
     name = _zone(zone)
     target = _date(target_date) if target_date else None
@@ -271,10 +273,16 @@ def list_forecasts(zone: str, limit: int = Query(400, ge=1, le=2000)) -> list[di
 
 
 @app.get("/zones/{zone}/forecasts/{target_date}")
-def get_forecast(zone: str, target_date: str) -> dict[str, Any]:
-    """Latest stored forecast for a day with the ISO overlay and actuals where they exist."""
+def get_forecast(
+    zone: str,
+    target_date: str,
+    version: str | None = Query(None, description="a model_version from `versions`"),
+) -> dict[str, Any]:
+    """A day's primary forecast (the served model's, else the newest) with the ISO overlay,
+    the actuals where they exist and `versions`, every version stored for that day; pass
+    `version` to read one of the others (a live retrain, an older bundle)."""
     try:
-        return service.get_forecast(_zone(zone), _date(target_date))
+        return service.get_forecast(_zone(zone), _date(target_date), version)
     except LookupError as exc:
         raise HTTPException(404, str(exc)) from exc
 

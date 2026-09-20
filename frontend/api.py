@@ -103,8 +103,9 @@ class Api:
     def forecasts(self, zone: str, limit: int = 400) -> list[dict[str, Any]]:
         return self.get(f"/zones/{zone}/forecasts", limit=limit)
 
-    def forecast(self, zone: str, target: date | str) -> dict[str, Any]:
-        return self.get(f"/zones/{zone}/forecasts/{_iso(target)}")
+    def forecast(self, zone: str, target: date | str, version: str | None = None) -> dict[str, Any]:
+        """The day's primary version, or the `version` named (one of its `versions`)."""
+        return self.get(f"/zones/{zone}/forecasts/{_iso(target)}", version=version)
 
     def create_forecast(
         self, zone: str, target: date | str | None = None, model: str = "auto"
