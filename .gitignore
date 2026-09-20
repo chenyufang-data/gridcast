@@ -61,3 +61,7 @@ results/tft_full/*
 *.un~
 *~
 .claude/
+
+# local planning documents (the plan and the demo runbook stay on this machine)
+docs/plan.md
+docs/demo_video_runbook.md

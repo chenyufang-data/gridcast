@@ -11,9 +11,10 @@ NYISO's own forecast, and fronts it all with a chat-driven web UI.
 PyTorch → ONNX Runtime · LightGBM · FastAPI · SQLite · Streamlit · Gemini on Vertex AI · Docker · Caddy.
 
 > **Status: model, backtest, service and UI are done; deployment to GCE (Phase 5) is next.**
-> The build plan and the rules for what may become a headline number are in
-> [docs/plan.md](docs/plan.md); every number below has a one-command script in
-> [scripts/](scripts/README.md) and an entry in [docs/experiments.md](docs/experiments.md).
+> The rules for what may become a headline number are in the decisions table of
+> [CLAUDE.md](CLAUDE.md) (the build plan itself stays local); every number below has a
+> one-command script in [scripts/](scripts/README.md) and an entry in
+> [docs/experiments.md](docs/experiments.md).
 > This is the US-native successor of
 > [gridcast-shanxi](https://github.com/chenyufang-data/gridcast-shanxi).
 
@@ -95,7 +96,7 @@ scripts/        one-command data pulls and reports behind every headline number
 tests/          offline suite; tests/synthetic.py = NYISO-shaped synthetic archive
 deploy/         Caddyfile, seed script (backfill + first forecasts), GCE runbook (Phase 5)
 data/           README only; fetched data is cached here and gitignored
-docs/           plan, experiment log, conventions
+docs/           experiment log
 results/        per-run backtest outputs (gitignored except the default run's summaries)
 ```
 

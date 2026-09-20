@@ -1,6 +1,8 @@
 # CLAUDE.md — session handoff for `gridcast` (NYISO successor)
 
-Read this first, then `docs/plan.md` (approved) and `CONTRIBUTING.md` (conventions).
+Read this first, then `docs/plan.md` (approved; **local only**, gitignored with
+`docs/demo_video_runbook.md` on 2026-09-20 at the user's request, so the decisions below
+are the copy that travels) and `CONTRIBUTING.md` (conventions).
 Written 2026-09-17; nothing below is speculative — every fact was verified or decided
 by the user.
 
