@@ -1,6 +1,8 @@
 # Local development stack:  docker compose up --build
 # Host ports 8010/8510 (8000/8501 are taken by another local stack); inside
 # the compose network the services keep their native ports.
+name: gridcast-nyiso
+
 services:
   backend:
     build: .

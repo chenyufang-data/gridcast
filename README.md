@@ -109,8 +109,17 @@ py -3.13 -m venv .venv
 .\.venv\Scripts\python.exe -m streamlit run frontend/app.py     # http://localhost:8501
 ```
 
-Or `docker compose up --build` (backend on :8010, frontend on :8510). Environment
-variables are documented in [.env.sample](.env.sample); working conventions in
+Or with Docker (backend on :8010, frontend on :8510):
+
+```powershell
+docker compose up -d --build
+docker compose exec backend sh -c "mkdir -p /data/models/tft"           # served TFT bundle
+docker compose cp data/models/tft/tft.onnx backend:/data/models/tft/tft.onnx
+docker compose cp data/models/tft/tft.json backend:/data/models/tft/tft.json
+docker compose exec backend python deploy/seed.py --months 3 --forecast-days 3   # ~1-2 min
+```
+
+Environment variables are documented in [.env.sample](.env.sample); working conventions in
 [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## The service

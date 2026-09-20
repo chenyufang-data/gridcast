@@ -3,6 +3,8 @@
 # Caddy terminates HTTPS; only ports 80/443 are public. Reads are public,
 # writes need X-Admin-Token. See deploy/RUNBOOK.md (Phase 5).
 
+name: gridcast-nyiso
+
 services:
   backend:
     build: .

@@ -148,13 +148,29 @@ lock file, logging, type hints, LICENSE, data provenance, year-proof holidays).
   backend on :8011 (every view, the served-model and retrain buttons, a saved schedule).
   `google-genai` was added to the frontend requirements; all three locks regenerated.
   Streamlit 1.64: `use_container_width` is deprecated, use `width="stretch"`.
+- **Local Docker check done (2026-09-20).** `docker compose build` → backend 865 MB, frontend
+  949 MB (python:3.11-slim + pandas/sklearn/lightgbm/onnxruntime; streamlit/plotly/google-genai).
+  `docker compose up -d`, bundle copied into the volume, `docker compose exec backend python
+  deploy/seed.py --months 3 --forecast-days 3` → 72 s from the live archive (3 months × 5
+  tables, weather, 5 forecast days, scoring); the frontend container drove every view against
+  `http://backend:8000` through AppTest (served-model button 0.3 s, retrain 2.9 s in the
+  container, schedule saved); backend peak ~330 MB RSS. Gotchas: (1) the compose project is
+  now pinned to `name: gridcast-nyiso` because the folder's old default project `gridcast` owns
+  `gridcast_app_data`, an 82 MB Shanxi-era database — leave or `docker volume rm` it, the new
+  stack never touches it; (2) in Git Bash, container paths passed to `docker compose exec/cp`
+  get MSYS path conversion (`/data/models` → `C:/Program Files/Git/data/models`): prefix
+  `MSYS_NO_PATHCONV=1` or wrap in `sh -c "..."`; (3) `docker compose cp` of a directory needs
+  the parent to exist in the container — `mkdir -p /data/models/tft` then copy the two files;
+  (4) at first start the scheduler runs every never-run job at once (catch-up semantics):
+  `forecast_all` skips every zone on an empty store, `ingest_score` fetches the last 45 days,
+  then the seed fills the rest — expected, harmless, noisy in the log.
 - **Next action: Phase 5 — GCE deployment.** `deploy/RUNBOOK.md` (EN): project + billing,
   firewall (22 from the user's IP, 80/443 public), static IP, DNS A record for
   `gridcast.cyfang.org`, **VM service account with `roles/aiplatform.user` and the Vertex
   AI API enabled** (the chat model needs no key), `git clone`, `.env` on the VM only
   (`ADMIN_TOKEN`, `VERTEX_PROJECT`, `SITE_ADDRESS`, optional `GITHUB_TOKEN`),
-  `docker compose -f docker-compose.prod.yml up -d --build`, copy `data/models/tft/` to
-  the volume (`docker compose cp`), `docker compose exec backend python deploy/seed.py`,
+  `docker compose -f docker-compose.prod.yml up -d --build`, copy the bundle into the volume
+  (`exec backend mkdir -p /data/models/tft`, then `cp` `tft.onnx` and `tft.json`), `docker compose exec backend python deploy/seed.py`,
   health checks, verify the 04:30 / 06:30 / 08:30 ET jobs ran, snapshot / stop schedule.
   The frontend container must forward the visitor IP: Caddy sets `X-Forwarded-For`, and
   Streamlit exposes it through `st.context.headers`. Then Phase 6 (demo video + README
