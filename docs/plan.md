@@ -11,7 +11,7 @@
 | Decision | Value |
 |---|---|
 | Repo | `chenyufang-data/gridcast` (public, MIT). Local folder `Documents/gridcast-nyiso` until the folder swap (Q4) |
-| Access model | public read without login; every write endpoint behind `X-Admin-Token`; no paid LLM key on the public site |
+| Access model | public read without login; every write endpoint behind `X-Admin-Token`; no LLM key anywhere: the chat model is Gemini via Vertex AI authenticated by the VM's service account (decided 2026-09-20; GitHub Models optional), with a per-visitor and a global daily request limit and the keyword guide as the fallback |
 | Headline rules | MAPE is not the headline if NYISO's own forecast beats ours. The α-bid is the headline only if it is measured in $ (imbalance cost), beats the strongest baseline incl. `isolf + α`, and α is estimated strictly before each bid's cutoff; otherwise secondary |
 | Domain | `https://gridcast.cyfang.org` (Caddy auto-HTTPS) |
 | Demo video | < 2 minutes, English |
@@ -138,7 +138,7 @@ Weather: Open-Meteo previous-runs API for each zone centroid, D−1-issued forec
 
 Runbook (`deploy/RUNBOOK.md`, English): project + billing check → firewall (22 from
 my IP, 80/443 public) → static external IP → DNS `A gridcast.cyfang.org → IP` (TTL 300)
-→ `git clone`, `.env` on the VM only (`ADMIN_TOKEN`, `GITHUB_TOKEN`, `SITE_ADDRESS`)
+→ VM service account with `roles/aiplatform.user` + Vertex AI API enabled (chat model, no key) → `git clone`, `.env` on the VM only (`ADMIN_TOKEN`, `VERTEX_PROJECT`, `SITE_ADDRESS`)
 → `docker compose -f docker-compose.prod.yml up -d --build` → Caddy obtains the
 certificate → `deploy/seed.py` backfills 15 months from monthly zips → health checks →
 verify the scheduler ran → logs (`docker compose logs`) → teardown / snapshot / stop
@@ -165,7 +165,7 @@ Full shot list + ≤ 260-word speech notes ship with the app (`docs/demo_video_r
 | 1 | NYISO fetch + normalize + cache + DST tests + `data/README.md` | M |
 | 2 | model port with cutoff timestamp, features, backtest CLI, baselines, `isolf`, α estimation, imbalance report, calibration/conformal, experiment log | L |
 | 3 | backend port: zones, schedules, $ scoring, admin token, scheduler, tests (e2e with real training) — **done 2026-09-20** (`app/db.py`, `app/service.py`, `app/serving.py`, `app/scheduler.py`, `app/main.py`, `deploy/seed.py`; the CSV-upload adapter path was dropped: the archive fetch is the only ingest) | M |
-| 4 | frontend EN: six views, chat persona, mocked-router tests | M |
+| 4 | frontend EN: six views, chat persona, mocked-router tests — **done 2026-09-20** (`frontend/api.py`, `router.py`, `llm.py`, `charts.py`, `app.py`; tests through `streamlit.testing.AppTest` on a fake backend) | M |
 | 5 | GCE deploy, DNS, HTTPS, seed, runbook | S |
 | 6 | demo video runbook + speech notes; README written under §4 | S |
 

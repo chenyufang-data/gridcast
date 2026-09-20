@@ -5,11 +5,12 @@
 Day-ahead load forecasts for the eleven NYISO zones and the statewide total, built
 for the way the market actually settles: bids are due **05:00 ET on D−1**, and every
 MWh of forecast error is settled at the **real-time price**. The product turns a
-15-minute LightGBM forecast with P10–P90 bands into a cost-aware DAM bid, scores both
-in dollars against NYISO's own forecast, and fronts it all with a chat-driven web UI.
-LightGBM · FastAPI · SQLite · Streamlit · Docker · Caddy.
+15-minute forecast (a Temporal Fusion Transformer served as ONNX, LightGBM trees as the
+fallback) with P10–P90 bands into a cost-aware DAM bid, scores both in dollars against
+NYISO's own forecast, and fronts it all with a chat-driven web UI.
+PyTorch → ONNX Runtime · LightGBM · FastAPI · SQLite · Streamlit · Gemini on Vertex AI · Docker · Caddy.
 
-> **Status: Phase 2 (model + backtest) done; service, UI and deployment follow.**
+> **Status: model, backtest, service and UI are done; deployment to GCE (Phase 5) is next.**
 > The build plan and the rules for what may become a headline number are in
 > [docs/plan.md](docs/plan.md); every number below has a one-command script in
 > [scripts/](scripts/README.md) and an entry in [docs/experiments.md](docs/experiments.md).
@@ -89,7 +90,7 @@ project. Details, verified file layouts, and the DST gotchas: [data/README.md](d
 models/         modeling package shared by src/ and app/: cutoff guard, features, LightGBM / XGBoost, swap-noise augmentation, TFT
 src/            constants, dataset builder, backtest engine, settlement, baselines, metrics
 app/            NYISO archive client, weather, SQLite store, service (ingest / forecast / settle / score), scheduler, FastAPI
-frontend/       Streamlit UI, HTTP client of the API only (Phase 4)
+frontend/       Streamlit UI (api client, keyword router, Gemini/GitHub chat layer, charts, app)
 scripts/        one-command data pulls and reports behind every headline number
 tests/          offline suite; tests/synthetic.py = NYISO-shaped synthetic archive
 deploy/         Caddyfile, seed script (backfill + first forecasts), GCE runbook (Phase 5)
@@ -148,6 +149,26 @@ $env:ADMIN_TOKEN = "dev-token"
 # seed a store from the archive (24 months by default; --months 2 for a quick local run)
 .\.venv\Scripts\python.exe deploy\seed.py --months 2 --forecast-days 7
 ```
+
+## The demo UI
+
+`frontend/` is a Streamlit app that talks to the API only. The sidebar picks the zone
+and the view and shows which model is serving; the left pane is the chat guide; the
+right pane is one of six views: **Overview** (zone cards: 7-day MAPE and dollars next to
+NYISO's own forecast, alerts), **Forecast** (median, P10–P90, α-bid, NYISO overlay,
+actuals; buttons to forecast the next bid day with the served model or retrain the
+trees live), **DAM Schedule** (start from the α-bid or the median, scale, edit any hour,
+see the $ at risk and the hours outside the band, save, export CSV, and later the
+schedule's own score), **Forecast vs Actual** (MAPE and dollars per hour, backfill
+missing days), **Prices** (DA vs RT, the spread, α and its costs) and **Load**.
+
+The chat guide navigates from plain English. Chips never cost a model call. Typed text
+goes to **Gemini on Vertex AI** when configured (`LLM_PROVIDER=vertex`; the GCE VM's
+service account authenticates, so there is no key anywhere), within a per-visitor and a
+global daily limit; otherwise, over the limit, or whenever the model fails, the
+**keyword guide** answers with the same navigation. Every chart follows one validated
+palette (forecast blue, actual orange, NYISO aqua, your bid yellow, dollars blue/red
+around zero), one axis per chart, and has a table view.
 
 ## License
 

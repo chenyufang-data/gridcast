@@ -124,15 +124,41 @@ lock file, logging, type hints, LICENSE, data provenance, year-proof holidays).
   for a full tree pass. A real bundle exists locally: `data/models/tft/` (gitignored),
   `tft-onnx:e979ee4c9f6d:2026-09-19T09:00:00+00:00`, verified 6e-7 vs torch.
   Not done locally: the Docker builds (Docker Desktop was not running); CI builds both images.
-- **Next action: Phase 4 — frontend (EN-native Streamlit).** Port `frontend/app.py` and
-  `frontend/router.py` from gridcast-shanxi against the API above: zone cards (`GET /zones`),
-  Forecast view (`GET /zones/{z}/forecasts/{date}`: median, P10–P90, α-bid, `isolf_pre` /
-  `isolf_post` overlay, actuals), DAM Schedule (`POST /zones/{z}/schedules` with the admin
-  token held by the frontend; `usd_at_risk`, `GET /zones/{z}/alpha`), Forecast vs Actual
-  (`GET /zones/{z}/compare` with $/hour and the ISO line), Prices (`GET /zones/{z}/prices`),
-  Load (`GET /zones/{z}/load`), chat panel with the English persona (GitHub Models free
-  tier), retrain button = `POST /zones/{z}/forecasts?model=lgbm`, model badge from
-  `GET /models`. Footer: the data credit from `/health`. Mocked-router tests.
+- **Phase 4 (frontend) is done (2026-09-20).** `frontend/api.py` (typed HTTP client; the
+  admin token stays in the frontend process; `set_client` for tests), `frontend/router.py`
+  (the keyword guide: zone aliases on word boundaries, view cues in priority order
+  compare > schedule > prices > forecast > load, dates incl. relative phrases and bare
+  months, `sanitize` for model output; the zone list is duplicated here because the
+  frontend image ships alone), `frontend/llm.py` (providers `VertexGemini` via the
+  google-genai SDK with ADC, `GitHubModels`; `LLM_PROVIDER=auto|vertex|github|none`;
+  `ChatLimiter` per visitor (`X-Forwarded-For` / IP, else session) and global per UTC day;
+  every failure, limit or garbage reply falls back to the keyword guide with a visible
+  note), `frontend/charts.py` (Plotly on the data-viz reference palette: forecast blue,
+  actual orange, NYISO aqua, bid yellow dotted, dollars blue/red diverging around zero,
+  hairline solid grid, unified crosshair tooltip, one axis per chart), `frontend/app.py`
+  (sidebar = zone + view + served-model badge + chat budget; left pane = chips + chat;
+  right pane = Overview cards / Forecast / DAM Schedule (data editor, α-bid or median
+  start, scale %, $ at risk, hours outside the band, save, CSV, history) / Forecast vs
+  Actual (backfill button) / Prices / Load; every chart has a table expander; widget
+  state pattern: state keys are the truth, each widget is seeded right before creation
+  and writes back via `on_change` — never set a widget key after it exists). Tests:
+  `tests/test_router.py`, `tests/test_llm.py` (fake provider, limits, fallbacks),
+  `tests/test_frontend.py` (`streamlit.testing.AppTest` on a `FakeApi`: every view, the
+  buttons, chips, chat input, backend-down message). Smoke-tested against the real-data
+  backend on :8011 (every view, the served-model and retrain buttons, a saved schedule).
+  `google-genai` was added to the frontend requirements; all three locks regenerated.
+  Streamlit 1.64: `use_container_width` is deprecated, use `width="stretch"`.
+- **Next action: Phase 5 — GCE deployment.** `deploy/RUNBOOK.md` (EN): project + billing,
+  firewall (22 from the user's IP, 80/443 public), static IP, DNS A record for
+  `gridcast.cyfang.org`, **VM service account with `roles/aiplatform.user` and the Vertex
+  AI API enabled** (the chat model needs no key), `git clone`, `.env` on the VM only
+  (`ADMIN_TOKEN`, `VERTEX_PROJECT`, `SITE_ADDRESS`, optional `GITHUB_TOKEN`),
+  `docker compose -f docker-compose.prod.yml up -d --build`, copy `data/models/tft/` to
+  the volume (`docker compose cp`), `docker compose exec backend python deploy/seed.py`,
+  health checks, verify the 04:30 / 06:30 / 08:30 ET jobs ran, snapshot / stop schedule.
+  The frontend container must forward the visitor IP: Caddy sets `X-Forwarded-For`, and
+  Streamlit exposes it through `st.context.headers`. Then Phase 6 (demo video + README
+  under §4).
 - GitHub: `origin` = https://github.com/chenyufang-data/gridcast (private), `main`
   pushed and tracking. CI status must be checked on the web (no `gh`).
 - Folder swap is done: this repo is `Documents/gridcast`, the source is
@@ -151,6 +177,7 @@ lock file, logging, type hints, LICENSE, data provenance, year-proof holidays).
 | Settlement granularity | 15-min slot × mean of the three 5-min RT LBMPs − DA LBMP |
 | Cloud | GCE **e2-small + 2 GB swap**, 20 GB pd-balanced, static IPv4, **us-east1** recommended (same price tier as us-central1; us-east4 ~10–15% more). ≈ $19/mo. The user has a **$300 GCP new-user credit expiring late November 2026** → deploy early (target: site live well before mid-November); e2-medium is affordable under the credit if the VM ever OOMs |
 | Domain | `https://gridcast.cyfang.org`; user adds the DNS A record; Caddy auto-HTTPS |
+| Chat model (decided 2026-09-20) | **Gemini via Vertex AI**, authenticated by the VM's service account (no key file anywhere; `roles/aiplatform.user`), default `gemini-2.5-flash-lite` in `us-central1`; per-visitor (20) and global (300) daily request limits; the keyword guide is the fallback for no model / over limit / failures; GitHub Models stays an optional second provider |
 | Demo video | < 2:00, English, **the user's own voice + burned-in captions**; deliver speech notes (~150 wpm, ≤ 260 words) and an SRT file |
 | Heavy compute | the 12-zone × 12-month backtest runs on the user's laptop; the VM only does daily incremental fetch + one forecast per zone |
 | Served models (decided 2026-09-18) | **TFT exported to ONNX on the laptop and uploaded monthly** (export pins eval mode and is verified against torch on fresh inputs: 1.3e-6 agreement, dynamic batch, 79 ms for 12 zones on CPU, 2.2 MB file); the VM runs it with `onnxruntime` only, never torch. **LightGBM trees stay the fallback and the model the demo retrains live.** VM stays **e2-small**. A monthly TFT refit on the VM is ruled out by measurement (50 min on two fast laptop threads, 4.2 GB resident) |
@@ -191,8 +218,8 @@ lock file, logging, type hints, LICENSE, data provenance, year-proof holidays).
 | `app/service.py` | 1,058 | done (rewritten): ingest/catch-up, both models, α, conformal band, versioning, $ scoring, alerts, views, schedules, retention; + `app/serving.py` (142), `app/scheduler.py` (176) | 1,661 |
 | `app/main.py` | 320 | done: admin-token + rate-limit middleware, zones/forecasts/schedules/scores/compare/load/prices/isolf/alpha/alerts/jobs/admin endpoints | 370 |
 | `app/weather.py` | 82 | zone centroids | ~30 |
-| `frontend/router.py` | 416 | English persona, zone aliases | ~80 |
-| `frontend/app.py` | 1,161 | English strings, α-bid line, `isolf` overlay, $ annotations, Prices view | ~500 |
+| `frontend/router.py` + `llm.py` | 416 | done: keyword guide (aliases, cues, dates), Gemini/GitHub providers, daily limits | ~570 |
+| `frontend/app.py` + `charts.py` + `api.py` | 1,161 | done: six views, chat pane, served-model badge, DAM editor, palette charts | ~1,100 |
 | `scripts/` | 165 | + `isolf` baseline, `imbalance_report.py`, conformal upper quantile | ~350 |
 | `tests/` | 753 | keep adapter/router suites; rewrite service e2e for zones/prices; new DST, α, imbalance tests; synthetic generator done (`tests/synthetic.py`) | ~600 |
 | deploy | ~100 + md | compose/Caddyfile ported; `seed.py` done (97); EN GCP runbook pending (Phase 5) | ~250 |

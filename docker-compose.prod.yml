@@ -23,8 +23,15 @@ services:
     environment:
       API_BASE: http://backend:8000
       ADMIN_TOKEN: ${ADMIN_TOKEN}
-      # free-tier LLM routing; safe to expose (daily cap, graceful 429)
+      # chat panel: GitHub Models free tier (optional second provider)
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      # Gemini via Vertex AI (the VM's service account authenticates; no key file)
+      LLM_PROVIDER: ${LLM_PROVIDER:-auto}
+      VERTEX_PROJECT: ${VERTEX_PROJECT:-}
+      VERTEX_LOCATION: ${VERTEX_LOCATION:-us-central1}
+      VERTEX_MODEL: ${VERTEX_MODEL:-gemini-2.5-flash-lite}
+      CHAT_LIMIT_PER_USER_DAY: ${CHAT_LIMIT_PER_USER_DAY:-20}
+      CHAT_LIMIT_GLOBAL_DAY: ${CHAT_LIMIT_GLOBAL_DAY:-300}
     depends_on:
       - backend
 

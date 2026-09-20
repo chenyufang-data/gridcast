@@ -28,6 +28,11 @@ os.environ.setdefault("WEATHER_PATH", os.path.join(_isolated, "weather.csv"))
 os.environ.setdefault("WEATHER_HOURLY_PATH", os.path.join(_isolated, "weather_hourly.csv"))
 os.environ.setdefault("SCHEDULER_ENABLED", "0")
 os.environ.setdefault("WEATHER_REFRESH", "0")
+os.environ.setdefault("LLM_PROVIDER", "none")
+# the e2e suite issues dozens of admin writes in a minute; the bucket itself is unit-tested
+os.environ.setdefault("WRITE_RATE_PER_MIN", "6000")
+os.environ.setdefault("WRITE_RATE_BURST", "1000")
+os.environ.setdefault("API_BASE", "http://127.0.0.1:9")
 
 from tests.synthetic import SyntheticNYISO  # noqa: E402
 

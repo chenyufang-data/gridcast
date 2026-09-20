@@ -433,7 +433,9 @@ def test_jobs_and_retention(client: TestClient) -> None:
         "forecast_all", "ingest_score", "isolf_refresh", "retention"
     }  # fmt: skip
     assert client.post("/admin/jobs/nope/run", headers=TOKEN).status_code == 404
-    run = client.post("/admin/jobs/isolf_refresh/run", headers=TOKEN).json()
+    r = client.post("/admin/jobs/isolf_refresh/run", headers=TOKEN)
+    assert r.status_code == 200, r.text
+    run = r.json()
     assert run["status"] == "ok" and "isolf" in run["result"]
     assert any(r["name"] == "isolf_refresh" and r["last_status"] == "ok" for r in jobs_now(client))
 

@@ -4,3 +4,4 @@ plotly>=5.18
 requests>=2.31
 pandas>=2.2
 python-dotenv>=1.0      # loads GITHUB_TOKEN / API_BASE from .env locally
+google-genai>=1.30      # chat panel: Gemini via Vertex AI (ADC on the VM; frontend/llm.py)

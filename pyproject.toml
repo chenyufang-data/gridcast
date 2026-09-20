@@ -25,7 +25,7 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "scripts/*" = ["T20", "E501"]  # CLI scripts print their report; long output strings
 "deploy/*" = ["T20", "E501"]   # deploy/seed.py is a CLI script too
-"tests/*" = ["T20", "DTZ"] # test helpers may print and build naive fixtures deliberately
+"tests/*" = ["T20", "DTZ", "E501"]  # helpers may print, build naive fixtures, hold long literals
 "frontend/*" = ["T20"]
 
 [tool.ruff.lint.isort]
@@ -47,6 +47,6 @@ pretty = true
 module = [
     "pandas.*", "lightgbm.*", "sklearn.*", "streamlit.*", "plotly.*",
     "holidays.*", "matplotlib.*", "requests.*", "dotenv.*", "xgboost.*", "torch.*",
-    "onnxruntime.*",
+    "onnxruntime.*", "google.*",
 ]
 ignore_missing_imports = true
