@@ -162,8 +162,8 @@ $env:ADMIN_TOKEN = "dev-token"
 ## The demo UI
 
 `frontend/` is a Streamlit app that talks to the API only. The sidebar picks the zone
-and the view and shows which model is serving; the left pane is the chat guide; the
-right pane is one of six views: **Overview** (zone cards: 7-day MAPE and dollars next to
+and the view and shows which model is serving; the chat guide sits behind a floating
+bubble at the bottom right; the page is one of six views: **Overview** (zone cards: 7-day MAPE and dollars next to
 NYISO's own forecast, alerts), **Forecast** (median, P10–P90, α-bid, NYISO overlay,
 actuals; buttons to forecast the next bid day with the served model or retrain the
 trees live), **DAM Schedule** (start from the α-bid or the median, scale, edit any hour,
@@ -171,11 +171,13 @@ see the $ at risk and the hours outside the band, save, export CSV, and later th
 schedule's own score), **Forecast vs Actual** (MAPE and dollars per hour, backfill
 missing days), **Prices** (DA vs RT, the spread, α and its costs) and **Load**.
 
-The chat guide navigates from plain English. Chips never cost a model call. Typed text
-goes to **Gemini on Vertex AI** when configured (`LLM_PROVIDER=vertex`; the GCE VM's
-service account authenticates, so there is no key anywhere), within a per-visitor and a
-global daily limit; otherwise, over the limit, or whenever the model fails, the
-**keyword guide** answers with the same navigation. Every chart follows one validated
+The bubble opens a message window with a greeting, option pills (never a model call) and
+a text box. Typed text goes to **Gemini on Vertex AI** when configured
+(`LLM_PROVIDER=vertex`; the GCE VM's service account authenticates, so there is no key
+anywhere), within a per-visitor and a global daily limit; when the limit is reached the
+box locks and the guide asks the visitor to pick an option; when no model is configured
+or the model fails, the **keyword guide** answers with the same navigation. A reply that
+navigates closes the window and opens the view. Every chart follows one validated
 palette (forecast blue, actual orange, NYISO aqua, your bid yellow, dollars blue/red
 around zero), one axis per chart, and has a table view.
 

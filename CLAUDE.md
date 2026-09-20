@@ -136,8 +136,13 @@ lock file, logging, type hints, LICENSE, data provenance, year-proof holidays).
   note), `frontend/charts.py` (Plotly on the data-viz reference palette: forecast blue,
   actual orange, NYISO aqua, bid yellow dotted, dollars blue/red diverging around zero,
   hairline solid grid, unified crosshair tooltip, one axis per chart), `frontend/app.py`
-  (sidebar = zone + view + served-model badge + chat budget; left pane = chips + chat;
-  right pane = Overview cards / Forecast / DAM Schedule (data editor, α-bid or median
+  (sidebar = zone + view + served-model badge; the chat guide is a floating bubble
+  (bottom right, `st.container(key="chat_bubble")` + CSS) that opens a `st.dialog` window
+  with a greeting, option pills, the budget caption and the text box — `session_state.
+  chat_open` keeps it open across reruns, `on_dismiss` clears it, a navigating reply
+  closes it and toasts, an answer reruns the fragment, the box locks with a notice when
+  the daily limit is hit (2026-09-20, the user asked for it after seeing the chips
+  duplicate the sidebar); `?guide=open` opens it on load; page = Overview cards / Forecast / DAM Schedule (data editor, α-bid or median
   start, scale %, $ at risk, hours outside the band, save, CSV, history) / Forecast vs
   Actual (backfill button) / Prices / Load; every chart has a table expander; widget
   state pattern: state keys are the truth, each widget is seeded right before creation

@@ -122,8 +122,9 @@ Weather: Open-Meteo previous-runs API for each zone centroid, D−1-issued forec
 - **Frontend** (EN-native): zone cards (7-day MAPE, 7-day imbalance $, alert); Forecast
   (median, P10–P90, α-bid line, `isolf` overlay); DAM Schedule (slider/per-hour edits,
   live total MWh, expected imbalance $, $-at-risk guardrails); Forecast vs Actual (error
-  + DA/RT spread + $/hour); Prices; Load; chat panel with English persona, chips,
-  GitHub-Models free tier. No i18n layer.
+  + DA/RT spread + $/hour); Prices; Load; chat guide behind a floating bubble (dialog
+  window with greeting, option pills, Gemini via Vertex AI with daily limits, keyword
+  fallback). No i18n layer.
 - **Rate limiting**: Caddy has no built-in limiter → simple in-app per-IP token bucket
   on write endpoints and LLM calls (Q7).
 

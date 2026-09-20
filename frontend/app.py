@@ -5,11 +5,13 @@ Run (two terminals):
     streamlit run frontend/app.py             # UI on :8501
 
 Layout: the sidebar holds the zone and view selectors and the served-model badge; the
-left pane is the chat guide (chips never cost a model call; typed text goes to Gemini
-on Vertex AI when configured and within the visitor's daily limit, else to the keyword
-guide); the right pane is the view. Every action is a labelled button; primary buttons
-are the ones that write (forecast, retrain, save, backfill). This file imports nothing
-from ``app/``: the API is the only data source.
+page is the view; the chat guide sits behind a floating bubble (bottom right) that opens
+a dialog window with a greeting, the message history, option pills (never a model call)
+and a text box (Gemini on Vertex AI when configured and within the visitor's daily
+limit, else the keyword guide; once the limit is hit the box locks and the guide points
+at the options). A navigation reply closes the window and opens the view. Every action
+is a labelled button; primary buttons are the ones that write (forecast, retrain, save,
+backfill). This file imports nothing from ``app/``: the API is the only data source.
 
 Widget state: ``session_state.view / zone / target / start / end / granularity`` are the
 source of truth. Each widget has its own key, is seeded from that state right before it
@@ -28,6 +30,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import streamlit as st
+from streamlit.errors import StreamlitInvalidLayoutContextError
 
 # `streamlit run` puts only this file's folder on sys.path, not the repo root
 _ROOT = str(Path(__file__).resolve().parent.parent)
@@ -56,7 +59,7 @@ NAV_ICONS = {
     "prices": ":material/attach_money:",
     "load": ":material/show_chart:",
 }
-CHIPS: list[tuple[str, dict[str, Any]]] = [
+OPTIONS: list[tuple[str, dict[str, Any]]] = [
     ("📋 All zones", {"action": "list_zones"}),
     ("🔮 Forecast", {"action": "show_zone", "view": "forecast"}),
     ("🧾 DAM schedule", {"action": "show_zone", "view": "schedule"}),
@@ -65,13 +68,36 @@ CHIPS: list[tuple[str, dict[str, Any]]] = [
     ("⚡ Load", {"action": "show_zone", "view": "load"}),
     ("❓ Help", {"action": "help"}),
 ]
-CHIP_MAP = dict(CHIPS)
+OPTION_MAP = dict(OPTIONS)
+NAVIGATING = ("list_zones", "show_zone")
 MAX_BACKFILL_DAYS = 31
 WELCOME = (
-    "Hi! I'm the gridcast guide. Pick a chip, or type where you want to go, for example "
-    '"how accurate was the Long Island forecast last week".'
+    "👋 Hi, I'm the gridcast guide. Tell me where you want to go in plain English, for "
+    "example *how accurate was the Long Island forecast last week* or *NYC prices "
+    "yesterday*, and I'll open that view for you. You can also choose one of the options "
+    "below."
 )
+LIMIT_TEXT = (
+    "⏸️ You've hit the chat limit: {reason}. Choose one of the options below (they never "
+    "use the model), or close this window and use the menu on the left. Typed questions "
+    "open again tomorrow."
+)
+PLACEHOLDER = 'Ask or navigate: "NYC forecast", "West prices last week"…'
+PLACEHOLDER_LOCKED = "Daily chat limit reached: choose an option above"
 PRESETS = {"Yesterday": 1, "Last 7 days": 7, "Last 30 days": 30}
+BUBBLE_CSS = """
+<style>
+div.st-key-chat_bubble {
+  position: fixed !important; right: 1.75rem; bottom: 1.75rem; z-index: 100;
+  width: auto !important;
+}
+div.st-key-chat_bubble button {
+  width: 3.5rem; height: 3.5rem; min-height: 3.5rem; border-radius: 999px; padding: 0;
+  box-shadow: 0 6px 20px rgba(11, 11, 11, 0.28);
+}
+div.st-key-chat_bubble button span { font-size: 1.6rem; }
+</style>
+"""
 
 
 # ─── helpers ──────────────────────────────────────────────────────────────────────────
@@ -150,6 +176,8 @@ def init_state() -> None:
     ss.setdefault("end", None)
     ss.setdefault("granularity", "hour")
     ss.setdefault("chat", [("assistant", WELCOME)])
+    ss.setdefault("chat_open", st.query_params.get("guide") == "open")
+    ss.setdefault("limit_told", False)
     ss.setdefault("user_key", uuid.uuid4().hex)
     ss.setdefault("flash", None)
     ss.setdefault("sched_nonce", 0)
@@ -212,13 +240,28 @@ def _on_zone() -> None:
         st.session_state.view = "forecast"
 
 
-def _on_chip() -> None:
-    label = st.session_state.chip_pick
-    st.session_state.chip_pick = None
+def _open_chat() -> None:
+    st.session_state.chat_open = True
+
+
+def _close_chat() -> None:
+    st.session_state.chat_open = False
+
+
+def _on_option() -> None:
+    """An option pill in the chat window: navigate (and close) or answer (stay open)."""
+    ss = st.session_state
+    label = ss.option_pick
+    ss.option_pick = None
     if not label:
         return
-    st.session_state.chat.append(("user", label))
-    st.session_state.chat.append(("assistant", apply_intent(dict(CHIP_MAP[label]))))
+    intent = dict(OPTION_MAP[label])
+    reply = apply_intent(intent)
+    ss.chat.append(("user", label))
+    ss.chat.append(("assistant", reply))
+    if intent["action"] in NAVIGATING:
+        ss.chat_open = False
+        ss.flash = ("toast", reply)
 
 
 def _on_preset(key: str, today: date) -> None:
@@ -267,36 +310,77 @@ def render_sidebar(health: dict[str, Any]) -> None:
             st.caption(f"TFT bundle: {tft.get('error') or 'stale'}")
         data = health["data"]["load_slots"]
         st.caption(f"Load data through {(data.get('last') or '—')[:16]} UTC")
-        chat = llm.status()
-        if chat["provider"]:
-            left = llm.limiter.remaining(user_key())
-            st.caption(f"Chat: {chat['model']} · {left} model replies left today")
-        else:
-            st.caption("Chat: keyword guide (no model configured)")
         st.divider()
         st.caption(DATA_CREDIT)
 
 
-# ─── chat pane ────────────────────────────────────────────────────────────────────────
-def render_chat() -> None:
+# ─── chat guide: bubble + dialog window ───────────────────────────────────────────────
+def render_bubble() -> None:
+    """The floating button (bottom right) that opens the guide."""
+    st.markdown(BUBBLE_CSS, unsafe_allow_html=True)
+    with st.container(key="chat_bubble"):
+        st.button(
+            ":material/forum:",
+            key="chat_bubble_btn",
+            type="primary",
+            on_click=_open_chat,
+            help="Ask the gridcast guide",
+        )
+
+
+@st.dialog("gridcast guide", width="medium", icon=":material/forum:", on_dismiss=_close_chat)
+def chat_dialog(today: date) -> None:
+    """The message window. Runs as a fragment: typing reruns only this function."""
+    ss = st.session_state
+    if not ss.chat_open:  # an option pill navigated: close the window, show the view
+        st.rerun()
+    key = user_key()
+    status = llm.status()
+    allowed, reason = True, None
+    if status["provider"]:
+        allowed, reason = llm.limiter.check(key)
+    if allowed:
+        ss.limit_told = False
+    elif not ss.limit_told:
+        ss.limit_told = True
+        ss.chat.append(("assistant", LIMIT_TEXT.format(reason=reason)))
+    with st.container(height=380, border=False):
+        for role, content in ss.chat:
+            st.chat_message(role).markdown(content)
     st.pills(
-        "Quick actions",
-        list(CHIP_MAP),
-        key="chip_pick",
-        on_change=_on_chip,
+        "Options",
+        list(OPTION_MAP),
+        key="option_pick",
+        on_change=_on_option,
         label_visibility="collapsed",
     )
-    with st.container(height=520, border=True):
-        for role, content in st.session_state.chat:
-            st.chat_message(role).markdown(content)
-    text = st.chat_input('Ask or navigate: "NYC forecast", "West prices last week"…')
-    if text:
-        st.session_state.chat.append(("user", text))
-        with st.spinner("Thinking…"):
-            result = llm.chat(text, st.session_state.chat[:-1], ZONES, user_key(), today_et())
-        if result.note:
-            st.session_state.chat.append(("assistant", f"_({result.note})_"))
-        st.session_state.chat.append(("assistant", apply_intent(result.intent)))
+    if status["provider"]:
+        left = llm.limiter.remaining(key)
+        st.caption(
+            f"{status['model']} · {left} of {status['per_user_per_day']} model replies left "
+            "today · options never count"
+        )
+    else:
+        st.caption("Keyword guide (no chat model configured): name a zone and a view.")
+    text = st.chat_input(
+        PLACEHOLDER_LOCKED if not allowed else PLACEHOLDER, key="chat_text", disabled=not allowed
+    )
+    if not text:
+        return
+    ss.chat.append(("user", text))
+    with st.spinner("Thinking…"):
+        result = llm.chat(text, ss.chat[:-1], ZONES, key, today)
+    if result.note:
+        ss.chat.append(("assistant", f"_({result.note})_"))
+    reply = apply_intent(result.intent)
+    ss.chat.append(("assistant", reply))
+    if result.intent.get("action") in NAVIGATING:
+        ss.chat_open = False
+        ss.flash = ("toast", reply)
+        st.rerun()
+    try:  # an answer: redraw only the window (a fragment rerun, which only exists while
+        st.rerun(scope="fragment")  # the frontend runs the fragment; a full run of the
+    except StreamlitInvalidLayoutContextError:  # script, as in tests, takes the long way)
         st.rerun()
 
 
@@ -868,33 +952,35 @@ def main() -> None:
         return
     render_sidebar(health)
     today = today_et()
-    chat_col, main_col = st.columns([1, 2.6], gap="large")
-    with chat_col:
-        render_chat()
-    with main_col:
-        flash = st.session_state.flash
-        if flash:
-            st.session_state.flash = None
+    if st.session_state.chat_open:
+        chat_dialog(today)
+    flash = st.session_state.flash
+    if flash:
+        st.session_state.flash = None
+        if flash[0] == "toast":
+            st.toast(flash[1], icon=":material/forum:")
+        else:
             getattr(st, flash[0])(flash[1])
-        view, zone = st.session_state.view, st.session_state.zone
-        try:
-            if view == "overview":
-                render_overview(health)
-            elif view == "forecast":
-                render_forecast(zone, health)
-            elif view == "schedule":
-                render_schedule(zone, health)
-            elif view == "compare":
-                render_compare(zone, today)
-            elif view == "prices":
-                render_prices(zone, today)
-            else:
-                render_load(zone, today)
-        except BackendDown:
-            st.error("The backend went away; retry in a moment.", icon=":material/cloud_off:")
-        except ApiError as exc:
-            st.error(f"API error {exc.status}: {exc.detail}", icon=":material/error:")
+    view, zone = st.session_state.view, st.session_state.zone
+    try:
+        if view == "overview":
+            render_overview(health)
+        elif view == "forecast":
+            render_forecast(zone, health)
+        elif view == "schedule":
+            render_schedule(zone, health)
+        elif view == "compare":
+            render_compare(zone, today)
+        elif view == "prices":
+            render_prices(zone, today)
+        else:
+            render_load(zone, today)
+    except BackendDown:
+        st.error("The backend went away; retry in a moment.", icon=":material/cloud_off:")
+    except ApiError as exc:
+        st.error(f"API error {exc.status}: {exc.detail}", icon=":material/error:")
     st.caption(DATA_CREDIT)
+    render_bubble()
 
 
 main()

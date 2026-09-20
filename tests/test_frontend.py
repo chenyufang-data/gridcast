@@ -261,21 +261,72 @@ def test_compare_prices_and_load_views(fake: FakeApi) -> None:
     assert any("Peak" in m.label for m in at.metric)
 
 
-def test_chat_input_and_chips_navigate(fake: FakeApi) -> None:
+class FakeProvider:
+    """A chat model that always answers with the same JSON."""
+
+    name = "fake"
+    model = "fake-model"
+
+    def __init__(self, reply: str) -> None:
+        self.reply = reply
+
+    def complete(self, system: str, messages: Any, timeout: float) -> str:
+        return self.reply
+
+
+def test_chat_bubble_opens_a_window_that_navigates(fake: FakeApi) -> None:
     at = run()
+    assert not at.chat_input, "the chat is hidden until the bubble is clicked"
+    at.button(key="chat_bubble_btn").click().run()
+    assert not at.exception
+    assert at.session_state["chat_open"] is True and at.chat_input
+    assert at.session_state["chat"][0][1].startswith("👋")  # the greeting
+    assert at.pills(key="option_pick").options[1].endswith("Forecast")  # emoji becomes an icon
     at.chat_input[0].set_value("how accurate was the long island forecast last week").run()
     assert not at.exception
     assert at.session_state["view"] == "compare" and at.session_state["zone"] == "LONGIL"
     assert at.session_state["start"] == TODAY - timedelta(days=7)
     assert "Forecast vs Actual" in at.session_state["chat"][-1][1]
+    assert at.session_state["chat_open"] is False and not at.chat_input  # navigation closes it
+    assert any("Forecast vs Actual" in t.value for t in at.toast)
+    at.button(key="chat_bubble_btn").click().run()
     at.chat_input[0].set_value("help").run()
+    assert not at.exception
+    assert at.session_state["chat_open"] is True and at.chat_input  # an answer keeps it open
     assert "I can take you anywhere" in at.session_state["chat"][-1][1]
+    at.pills(key="option_pick").set_value("💲 Prices").run()
+    assert not at.exception
+    assert at.session_state["view"] == "prices" and at.session_state["chat_open"] is False
+    assert at.session_state["chat"][-2] == ("user", "💲 Prices")
     at = run()
     at.sidebar.selectbox[0].select("WEST").run()
     assert not at.exception
     assert at.session_state["zone"] == "WEST" and at.session_state["view"] == "forecast"
     at.sidebar.radio[0].set_value("load").run()
     assert not at.exception and at.session_state["view"] == "load"
+
+
+def test_chat_limit_locks_the_input_and_points_at_the_options(fake: FakeApi) -> None:
+    llm.set_provider(FakeProvider('{"action": "answer", "message": "Sure."}'))
+    saved = llm.limiter
+    llm.limiter = llm.ChatLimiter(per_user=1, global_cap=10)
+    try:
+        at = run({"chat_open": True})
+        assert not at.chat_input[0].proto.disabled
+        assert any("1 of 1 model replies left" in c.value for c in at.caption)
+        at.chat_input[0].set_value("what is alpha").run()
+        assert not at.exception
+        chat = at.session_state["chat"]
+        assert chat[-2] == ("assistant", "Sure.")
+        assert chat[-1][1].startswith("⏸️ You've hit the chat limit")
+        assert at.chat_input[0].proto.disabled
+        assert at.chat_input[0].placeholder.startswith("Daily chat limit reached")
+        at.pills(key="option_pick").set_value("🔮 Forecast").run()  # options still work
+        assert not at.exception
+        assert at.session_state["view"] == "forecast" and at.session_state["chat_open"] is False
+    finally:
+        llm.limiter = saved
+        llm.set_provider(None, "no chat model configured")
 
 
 def test_backend_down_is_a_message_not_a_crash() -> None:
