@@ -164,7 +164,7 @@ Full shot list + ≤ 260-word speech notes ship with the app (`docs/demo_video_r
 | 0 | scaffold (layout, LICENSE, lock file, CI, .gitignore, synthetic test fixtures, logging/typing conventions) | S |
 | 1 | NYISO fetch + normalize + cache + DST tests + `data/README.md` | M |
 | 2 | model port with cutoff timestamp, features, backtest CLI, baselines, `isolf`, α estimation, imbalance report, calibration/conformal, experiment log | L |
-| 3 | backend port: zones, schedules, $ scoring, admin token, scheduler, tests (adapters, e2e with real training) | M |
+| 3 | backend port: zones, schedules, $ scoring, admin token, scheduler, tests (e2e with real training) — **done 2026-09-20** (`app/db.py`, `app/service.py`, `app/serving.py`, `app/scheduler.py`, `app/main.py`, `deploy/seed.py`; the CSV-upload adapter path was dropped: the archive fetch is the only ingest) | M |
 | 4 | frontend EN: six views, chat persona, mocked-router tests | M |
 | 5 | GCE deploy, DNS, HTTPS, seed, runbook | S |
 | 6 | demo video runbook + speech notes; README written under §4 | S |

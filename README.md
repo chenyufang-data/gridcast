@@ -88,11 +88,11 @@ project. Details, verified file layouts, and the DST gotchas: [data/README.md](d
 ```
 models/         modeling package shared by src/ and app/: cutoff guard, features, LightGBM / XGBoost, swap-noise augmentation, TFT
 src/            constants, dataset builder, backtest engine, settlement, baselines, metrics
-app/            NYISO archive client, weather provider, logging, FastAPI (service: Phase 3)
+app/            NYISO archive client, weather, SQLite store, service (ingest / forecast / settle / score), scheduler, FastAPI
 frontend/       Streamlit UI, HTTP client of the API only (Phase 4)
 scripts/        one-command data pulls and reports behind every headline number
 tests/          offline suite; tests/synthetic.py = NYISO-shaped synthetic archive
-deploy/         Caddyfile, GCE runbook and seed script (Phase 5)
+deploy/         Caddyfile, seed script (backfill + first forecasts), GCE runbook (Phase 5)
 data/           README only; fetched data is cached here and gitignored
 docs/           plan, experiment log, conventions
 results/        per-run backtest outputs (gitignored except the default run's summaries)
@@ -111,6 +111,43 @@ py -3.13 -m venv .venv
 Or `docker compose up --build` (backend on :8010, frontend on :8510). Environment
 variables are documented in [.env.sample](.env.sample); working conventions in
 [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## The service
+
+The backend (`app/`) runs the same code as the backtest, live, as of each day's bid
+cutoff (D−1 05:00 ET), and keeps everything in one SQLite file on the data volume:
+
+- **Ingest.** `ArchiveClient` fetches one day of one file type at a time (daily files for
+  recent days, monthly zips for the rest, cached on the volume), normalizes it and
+  upserts 15-min load and real-time prices, hourly day-ahead prices and NYISO's own
+  forecast. Re-running never duplicates; a day the archive still lacks is retried.
+- **Two models, one identity per row.** The served model is the Temporal Fusion
+  Transformer exported to ONNX on the laptop (`scripts/export_tft.py`, uploaded to the
+  volume monthly, run with onnxruntime only); the LightGBM trees train on demand and take
+  over when the bundle is missing, stale or rejected, or for the demo's retrain button.
+  Every forecast row records `tft-onnx:<sha12>:<fit cutoff>` or `lgbm:<feature version>`
+  and a version hash of its data window, so "forecast vs actual" always shows what the
+  model said at the time.
+- **Bid and band.** α is the newsvendor ratio of the trailing 30 days of (RT − DA)
+  spreads as of the cutoff; the P10–P90 band is rescaled with the trailing 30 days of
+  scored forecasts of the same model (split conformal, as in the backtest).
+- **Scoring.** Each morning the previous day's forecasts and DAM schedules are scored in
+  hourly MAPE and in dollars (deviation × (RT − DA) per 15-min slot), next to NYISO's
+  pre-close forecast on the same day; alerts fire on MAPE above 10% or an imbalance
+  cost above the trailing P90.
+- **Schedule.** 04:30 ET forecast tomorrow (weather refresh + today's partial load first),
+  06:30 ET catch up and score, 08:30 ET fetch tomorrow's ISO forecast and DA prices,
+  monthly pruning past the retention window (24 months; forecasts and scores are kept).
+- **Access.** Every GET is public; POST/PATCH/DELETE need `X-Admin-Token` and pass a
+  per-IP rate limit. `GET /health` shows the data coverage, the served model and the
+  last job runs; the full API is at `/docs`.
+
+```powershell
+$env:ADMIN_TOKEN = "dev-token"
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
+# seed a store from the archive (24 months by default; --months 2 for a quick local run)
+.\.venv\Scripts\python.exe deploy\seed.py --months 2 --forecast-days 7
+```
 
 ## License
 

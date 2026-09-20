@@ -86,20 +86,53 @@ lock file, logging, type hints, LICENSE, data provenance, year-proof holidays).
   Gotcha: a 12-worker run once died with `BrokenProcessPool` near its end while the
   machine was loaded; re-running the same `--name` resumed from the per-day cache in
   two minutes.
-- **Next action: Phase 3 — backend port serving both models.** The service loads the ONNX
-  bundle from the data volume (`OnnxTFT.load`; `data/models/tft/` locally, uploaded monthly
-  from `scripts/export_tft.py`) and falls back to the trees when it is missing, stale or
-  rejected (feature version / hash); the trees stay train-on-demand (the demo's retrain
-  button, nightly scheduler). Forecast rows carry the model identity (`tft-onnx:<sha12>:
-  <cutoff>` or `lgbm:<FEATURE_VERSION>`) in the version hash. Backend port: `app/db.py` (zones, load/price tables,
-  forecasts + values, `schedules`, `forecast_scores` with `imbalance_usd` / `da_cost_usd`,
-  alerts), `app/service.py` (ingest via `ArchiveClient` + `resample_slots`, train-on-demand
-  via `models.forecast_day` (or the TFT) with the conformal band scaling and the α-bid, versioning hash
-  incl. `FEATURE_VERSION`, scoring in MAPE and $, α estimation from `src.settlement`),
-  `app/main.py` (`X-Admin-Token` middleware on POST/PATCH/DELETE, per-IP rate limit,
-  endpoints for zones/forecasts/schedules/scores/prices/isolf), scheduler (04:30 ET
-  forecast + α-bid for tomorrow, 06:30 ET fetch yesterday + score), `deploy/seed.py`
-  (backfill from cache), tests (service e2e with real training on synthetic data).
+- **Phase 3 (backend port) is done (2026-09-20).** `app/db.py` (SQLite on the data volume,
+  UTC text stamps; tables `load_slots`, `rt_slots`, `da_hourly`, `rt_hourly`, `isolf`,
+  `ingest_log`, `forecasts` + `forecast_values` (raw and conformal band, α-bid), `schedules` +
+  `schedule_values`, `forecast_scores` / `schedule_scores` (hourly MAPE, band coverage,
+  `imbalance_usd`, `da_cost_usd`, the ISO's pre-close MAPE and $ on the same day), `alerts`,
+  `jobs`), `app/serving.py` (`ModelRegistry`: reloads the ONNX bundle when the files change,
+  `TFT_MAX_AGE_DAYS` = 60 staleness, status for `/health` and `/models`), `app/service.py`
+  (per-day ingest with `ingest_log` catch-up and retry of recently missing days; today's
+  partial files are stored but never logged as complete; α as of the cutoff from
+  `src.settlement`; split-conformal band scales from the trailing 30 scored days of the same
+  model family; immutable forecasts versioned by a hash of data window + model identity +
+  settings, `model` = `tft-onnx:<sha12>:<fit cutoff>` or `lgbm:nyiso-fv1`; `auto` = TFT when
+  valid else trees with `fallback_reason`; scoring on complete UTC hours and per-slot
+  settlement of the hourly-mean bid; alerts (MAPE > 10 %, imbalance $ above the trailing P90
+  after 10 scored days); zone cards; compare / load / prices / isolf / alpha views; DAM
+  schedules = one flat MW bid per hour pinned to the latest forecast, `usd_at_risk` guardrail;
+  retention pruning on whole months, never below 14, never touching forecasts/scores),
+  `app/scheduler.py` (daemon thread, ET wall clock, a job runs when its last scheduled
+  occurrence is newer than its last run, so missed runs catch up at startup: 04:30
+  `forecast_all`, 06:30 `ingest_score`, 08:30 `isolf_refresh`, monthly `retention`),
+  `app/main.py` (`X-Admin-Token` + per-IP token bucket on every write; `/health`, `/models`,
+  `/jobs`, `/zones`, `/zones/{zone}/{forecasts,scores,compare,load,prices,isolf,alpha,
+  schedules}`, `/alerts`, `/admin/{ingest,score,weather/refresh,models/reload,jobs/{name}/run}`;
+  zone names resolve loosely: `nyc`, `hud_vl`), `app/weather.update` (incremental splice,
+  atomic write) and `weather.trim`, `deploy/seed.py` (runs inside the backend container:
+  ingest → weather → trailing forecasts with the served model → scores). The CSV-upload
+  adapter path of the source repo was dropped: the archive fetch is the only ingest.
+  Tests: `tests/test_service.py` (e2e on a synthetic archive with monthly zips + daily files:
+  ingest, catch-up, token guard, trees, NYCA, scoring = compare view, schedules, conformal
+  after 8 days, alerts, a tiny served TFT bundle with zone-missing / stale / corrupted
+  fallbacks, jobs, retention; ~30 s) and `tests/test_scheduler.py`; conftest isolates
+  `TFT_BUNDLE_DIR`, `WEATHER_PATH*`, `SCHEDULER_ENABLED=0`, `WEATHER_REFRESH=0`.
+  **Measured on real data (laptop, scratch store):** 14 months ingest from the cache 33 s →
+  179 MB SQLite; TFT `forecast_all` 12 zones 2.6 s; one tree fit (365-day window, weather)
+  10.6–11 s per zone on `MODEL_THREADS=2`, so budget ~1 min per zone on e2-small and ~10 min
+  for a full tree pass. A real bundle exists locally: `data/models/tft/` (gitignored),
+  `tft-onnx:e979ee4c9f6d:2026-09-19T09:00:00+00:00`, verified 6e-7 vs torch.
+  Not done locally: the Docker builds (Docker Desktop was not running); CI builds both images.
+- **Next action: Phase 4 — frontend (EN-native Streamlit).** Port `frontend/app.py` and
+  `frontend/router.py` from gridcast-shanxi against the API above: zone cards (`GET /zones`),
+  Forecast view (`GET /zones/{z}/forecasts/{date}`: median, P10–P90, α-bid, `isolf_pre` /
+  `isolf_post` overlay, actuals), DAM Schedule (`POST /zones/{z}/schedules` with the admin
+  token held by the frontend; `usd_at_risk`, `GET /zones/{z}/alpha`), Forecast vs Actual
+  (`GET /zones/{z}/compare` with $/hour and the ISO line), Prices (`GET /zones/{z}/prices`),
+  Load (`GET /zones/{z}/load`), chat panel with the English persona (GitHub Models free
+  tier), retrain button = `POST /zones/{z}/forecasts?model=lgbm`, model badge from
+  `GET /models`. Footer: the data credit from `/health`. Mocked-router tests.
 - GitHub: `origin` = https://github.com/chenyufang-data/gridcast (private), `main`
   pushed and tracking. CI status must be checked on the web (no `gh`).
 - Folder swap is done: this repo is `Documents/gridcast`, the source is
@@ -154,15 +187,15 @@ lock file, logging, type hints, LICENSE, data provenance, year-proof holidays).
 | `src/` backtest + config | 182 | rewrite: cutoff, per-zone, parallel, CLI (`scripts/run_backtest.py`); `src/config.py` done | ~250 |
 | `app/nyiso.py` (new) | — | fetch/cache/normalize incl. DST + dedupe | ~300 |
 | `app/adapters.py` | 290 | keep as secondary CSV path | ~30 |
-| `app/db.py` | 135 | zones, prices table, `schedules`, $ score columns | ~60 |
-| `app/service.py` | 1,058 | keep quality/flags/versioning/scoring core; add cutoff windows, $ scoring, α estimation, schedules, scheduler hooks | ~400 |
-| `app/main.py` | 320 | admin-token middleware, prices/isolf endpoints, logging (health + logging done) | ~100 |
+| `app/db.py` | 135 | done: zones, market tables, `schedules`, $ score columns, alerts, jobs | 268 |
+| `app/service.py` | 1,058 | done (rewritten): ingest/catch-up, both models, α, conformal band, versioning, $ scoring, alerts, views, schedules, retention; + `app/serving.py` (142), `app/scheduler.py` (176) | 1,661 |
+| `app/main.py` | 320 | done: admin-token + rate-limit middleware, zones/forecasts/schedules/scores/compare/load/prices/isolf/alpha/alerts/jobs/admin endpoints | 370 |
 | `app/weather.py` | 82 | zone centroids | ~30 |
 | `frontend/router.py` | 416 | English persona, zone aliases | ~80 |
 | `frontend/app.py` | 1,161 | English strings, α-bid line, `isolf` overlay, $ annotations, Prices view | ~500 |
 | `scripts/` | 165 | + `isolf` baseline, `imbalance_report.py`, conformal upper quantile | ~350 |
 | `tests/` | 753 | keep adapter/router suites; rewrite service e2e for zones/prices; new DST, α, imbalance tests; synthetic generator done (`tests/synthetic.py`) | ~600 |
-| deploy | ~100 + md | compose/Caddyfile ported (no basic auth, `ADMIN_TOKEN`); new EN GCP runbook, `seed.py`, scheduler | ~250 |
+| deploy | ~100 + md | compose/Caddyfile ported; `seed.py` done (97); EN GCP runbook pending (Phase 5) | ~250 |
 | **Total** | ~5,100 | | **≈ 3,000 new/rewritten (~45–50%), ≈ 3,000 reused with light edits** |
 
 ## Working conventions carried over (details in `CONTRIBUTING.md`)

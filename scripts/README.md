@@ -15,6 +15,7 @@ fetched, never redistributed).
 | `quantile_calibration.py` | P10/P90 coverage at slot and hourly resolution, before and after a trailing-30-day conformal rescaling |
 | `compare_runs.py` | scores experiment runs against a base run on exactly the same (zone, day) pairs, so partial sweeps stay comparable; `--bootstrap` adds a paired bootstrap over days (95% CI, share of days better, mean by month) |
 | `export_tft.py` | fits the TFT on the latest 365-day window (all zones, GPU) and writes the served bundle `data/models/tft/{tft.onnx, tft.json}` (constants, per-zone scales, feature version, SHA-256); the export pins eval mode, is verified against torch, and the bundle is re-loaded with onnxruntime for a smoke forecast of `--target` per zone. Upload both files to the VM's data volume once a month |
+| `../deploy/seed.py` | not a report: seeds a service store from the archive (ingest → weather → trailing forecasts with the served model → scores); run inside the backend container or locally against `APP_DB_PATH` |
 | `run_tft.py` | the Temporal Fusion Transformer (`models/tft.py`) under the same protocol, fitted once per `--refit-days` block on every zone (`--train-zones all`) and forecasting each day from an encoder that stops at that day's cutoff; same `results/<name>/` layout, so every report script works on it; needs torch (`requirements-research.txt`) |
 
 Typical sequence:

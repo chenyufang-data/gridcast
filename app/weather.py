@@ -224,3 +224,88 @@ def hourly_features_for(
                 out[f"{key}_h"] = zz[col].to_numpy()
         out["temp_h_prev3"] = out["temp_h"].shift(1).rolling(3, min_periods=1).mean()
     return out
+
+
+def _atomic_write(df: pd.DataFrame, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    df.to_csv(tmp, index=False)
+    tmp.replace(path)
+
+
+def _merge(old: pd.DataFrame | None, new: pd.DataFrame, key: str) -> pd.DataFrame:
+    """Replace the rows of `old` whose (`key`, zone) appear in `new`; append the rest."""
+    if old is None or old.empty:
+        return new.sort_values([key, "zone"]).reset_index(drop=True)
+    old = old.copy()
+    if key == "ts_utc":
+        old[key] = pd.to_datetime(old[key], utc=True)
+    else:
+        old[key] = pd.to_datetime(old[key])
+    lo, hi = new[key].min(), new[key].max()
+    keep = old[(old[key] < lo) | (old[key] > hi)]
+    out = pd.concat([keep, new], ignore_index=True)
+    return out.sort_values([key, "zone"]).reset_index(drop=True)
+
+
+def update(
+    start: date,
+    end: date,
+    path: Path | None = None,
+    hourly_path: Path | None = None,
+    pause: float = 0.3,
+) -> bool:
+    """Incremental refresh: fetch `start`..`end` for every zone and splice it into the CSVs.
+
+    Rows inside the fetched range are replaced (previous-run values fill in as model runs
+    complete), everything outside it is kept, and each file is rewritten atomically.
+    False on any failure, with the files untouched.
+    """
+    path = path or WEATHER_PATH
+    hourly_path = hourly_path or WEATHER_HOURLY_PATH
+    daily_frames, hourly_frames = [], []
+    try:
+        for zone in ZONES:
+            daily, hourly = fetch_zone(zone, start, end)
+            daily_frames.append(daily)
+            hourly_frames.append(hourly)
+            time.sleep(pause)
+    except Exception:
+        log.exception("weather update failed; keeping %s", path)
+        return False
+    daily_new = with_nyca(pd.concat(daily_frames, ignore_index=True))
+    hourly_new = with_nyca(pd.concat(hourly_frames, ignore_index=True), key="ts_utc")
+    daily_out = _merge(load_weather(path), daily_new, "date")
+    hourly_out = _merge(load_weather_hourly(hourly_path), hourly_new, "ts_utc")
+    _atomic_write(daily_out, path)
+    _atomic_write(hourly_out, hourly_path)
+    log.info(
+        "weather update %s..%s: %d zone-days fetched, files now %d / %d rows",
+        start,
+        end,
+        len(daily_new),
+        len(daily_out),
+        len(hourly_out),
+    )
+    return True
+
+
+def trim(boundary: date, path: Path | None = None, hourly_path: Path | None = None) -> int:
+    """Drop weather rows before `boundary` (retention); returns the number removed."""
+    path = path or WEATHER_PATH
+    hourly_path = hourly_path or WEATHER_HOURLY_PATH
+    removed = 0
+    daily = load_weather(path)
+    if daily is not None and not daily.empty:
+        keep = daily[daily["date"] >= pd.Timestamp(boundary)]
+        removed += len(daily) - len(keep)
+        if len(keep) != len(daily):
+            _atomic_write(keep, path)
+    hourly = load_weather_hourly(hourly_path)
+    if hourly is not None and not hourly.empty:
+        edge = pd.Timestamp(boundary, tz=MARKET_TZ).tz_convert("UTC")
+        keep = hourly[hourly["ts_utc"] >= edge]
+        removed += len(hourly) - len(keep)
+        if len(keep) != len(hourly):
+            _atomic_write(keep, hourly_path)
+    return removed

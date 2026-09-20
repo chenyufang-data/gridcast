@@ -14,6 +14,7 @@ RUN pip install --no-cache-dir -r requirements.lock
 COPY src/ src/
 COPY models/ models/
 COPY app/ app/
+COPY deploy/seed.py deploy/seed.py
 
 # SQLite and the NYISO fetch cache live on a mounted volume so they survive
 # container restarts. data/ itself is dockerignored (no NYISO bytes in images).
@@ -21,6 +22,8 @@ ENV APP_DB_PATH=/data/app.db
 ENV NYISO_CACHE_DIR=/data/cache
 ENV WEATHER_PATH=/data/weather.csv
 ENV WEATHER_HOURLY_PATH=/data/weather_hourly.csv
+# the ONNX TFT bundle (tft.onnx + tft.json) is uploaded to the volume monthly
+ENV TFT_BUNDLE_DIR=/data/models/tft
 VOLUME /data
 
 EXPOSE 8000

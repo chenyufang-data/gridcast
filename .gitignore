@@ -16,6 +16,8 @@ data/cache/
 data/*.csv
 data/*.zip
 data/processed/
+# exported model bundles (derived weights, uploaded to the VM by hand)
+data/models/
 
 # runtime state
 *.db
