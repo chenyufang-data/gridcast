@@ -66,3 +66,6 @@ results/tft_full/*
 docs/plan.md
 docs/demo_video_runbook.md
 CLAUDE.md
+
+# README screenshots (the only images in the repo)
+!docs/img/*.png

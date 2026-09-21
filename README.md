@@ -10,6 +10,8 @@ fallback) with P10–P90 bands into a cost-aware DAM bid, scores both in dollars
 NYISO's own forecast, and fronts it all with a chat-driven web UI.
 PyTorch → ONNX Runtime · LightGBM · FastAPI · SQLite · Streamlit · Gemini on Vertex AI · Docker · Caddy.
 
+![Forecast view: the served TFT's median with its P10–P90 band, the α-bid, NYISO's pre-close forecast and the actual load for one day, a live tree retrain drawn next to it, and both versions scored on the same actuals](docs/img/forecast.png)
+
 > **Status: model, backtest, service and UI are done; deployment to GCE (Phase 5) is next.**
 > The rules for what may become a headline number are in
 > [CONTRIBUTING.md](CONTRIBUTING.md#reporting-rules); every number below has a
@@ -173,6 +175,12 @@ scored on the same actuals, a click on a legend entry hides any line), **DAM Sch
 see the $ at risk and the hours outside the band, save, export CSV, and later the
 schedule's own score), **Forecast vs Actual** (MAPE and dollars per hour, backfill
 missing days), **Prices** (DA vs RT, the spread, α and its costs) and **Load**.
+
+| Overview: one card per zone, 7-day MAPE and dollars next to NYISO | DAM schedule: start from the α-bid, edit hours, see the $ at risk |
+|---|---|
+| ![Overview](docs/img/overview.png) | ![DAM schedule](docs/img/schedule.png) |
+| **Forecast vs actual**: a week of Long Island, MAPE and dollars per hour | **The guide**: type where you want to go, or pick an option |
+| ![Forecast vs actual](docs/img/compare.png) | ![The chat guide](docs/img/chat.png) |
 
 The bubble opens a message window with a greeting, option pills (never a model call) and
 a text box. Typed text goes to **Gemini on Vertex AI** when configured

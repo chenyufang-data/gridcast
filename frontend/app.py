@@ -701,10 +701,10 @@ def render_schedule(zone: str, health: dict[str, Any]) -> None:
     )  # fmt: skip
     fc = api.client().forecast(zone, ss.target)
     stats = api.client().alpha(zone, ss.target)
-    top[1].caption(
+    top[1].caption(  # dollar signs are escaped: a pair of them would render as LaTeX
         f"One MW bid per hour, settled at RT − DA. Trailing 30 days: α = {stats['alpha']:.2f} "
-        f"(short costs {stats['c_under_usd_per_mwh'] or 0:.2f} $/MWh, long costs "
-        f"{stats['c_over_usd_per_mwh'] or 0:.2f} $/MWh). Forecast {model_badge(fc['model'])}"
+        f"(short costs {stats['c_under_usd_per_mwh'] or 0:.2f} \\$/MWh, long costs "
+        f"{stats['c_over_usd_per_mwh'] or 0:.2f} \\$/MWh). Forecast {model_badge(fc['model'])}"
     )
     hourly = _hourly_from_forecast(fc)
     sig = f"{zone}|{ss.target}|{fc['model_version']}"
@@ -763,8 +763,8 @@ def render_schedule(zone: str, health: dict[str, Any]) -> None:
     with right:
         m = st.columns(3)
         m[0].metric(
-            "Total bid",
-            f"{total_bid:,.0f} MWh",
+            "Total bid (MWh)",
+            f"{total_bid:,.0f}",
             delta=f"{(total_bid / total_fc - 1) * 100:+.1f} % vs model" if total_fc else None,
         )
         m[1].metric(

@@ -3,3 +3,7 @@
 [theme]
 base = "light"
 primaryColor = "#2a78d6"
+
+# Public demo: no "Deploy" button or developer menu for visitors
+[client]
+toolbarMode = "minimal"
