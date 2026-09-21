@@ -80,7 +80,7 @@ class FakeApi(api.Api):
                     "history_days": 750,
                     "latest_forecast": {"target_date": TARGET.isoformat(), "model": "tft-onnx:e979ee4c9f6d:x", "model_version": "abc", "created_at": "x"} if has else None,
                     "last_7d": {"days": 3 if has else 0, "mape_hour": 3.5 if has else None, "imbalance_usd": 1200.0 if has else None, "isolf_mape_hour": 3.9 if has else None, "isolf_imbalance_usd": 1500.0 if has else None, "band_coverage": 78.0 if has else None},
-                    "alerts": [{"target_date": TARGET.isoformat(), "kind": "mape", "message": "hourly MAPE 12.0% exceeds 10%"}] if z == "WEST" else [],
+                    "alerts": [{"target_date": TARGET.isoformat(), "kind": "imbalance", "message": "imbalance cost $21,708 above the trailing-30-day P90 ($14,090)"}] if z == "WEST" else [],
                     "alert": z == "WEST",
                 }
             )  # fmt: skip
@@ -227,6 +227,8 @@ def test_overview_cards_and_open_button(fake: FakeApi) -> None:
     assert any("Zone overview" in m.value for m in at.markdown)
     labels = [b.label for b in at.button]
     assert "Open N.Y.C." in labels and "Open NYCA" in labels
+    # two dollar amounts in one markdown string would render as LaTeX: they are escaped
+    assert any("\\$21,708" in m.value and "\\$14,090" in m.value for m in at.markdown)
     at.button(key="open_LONGIL").click().run()
     assert not at.exception
     assert at.session_state["view"] == "forecast" and at.session_state["zone"] == "LONGIL"

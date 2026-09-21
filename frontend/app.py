@@ -117,6 +117,11 @@ def fmt_day(d: date) -> str:
     return f"{d:%a %b %d, %Y}"
 
 
+def md(text: str) -> str:
+    """Escape dollar signs for markdown: Streamlit renders a pair of them as LaTeX."""
+    return text.replace("$", "\\$")
+
+
 def model_kind(identity: str | None) -> str:
     if not identity:
         return "—"
@@ -346,7 +351,7 @@ def chat_dialog(today: date) -> None:
         ss.chat.append(("assistant", LIMIT_TEXT.format(reason=reason)))
     with st.container(height=380, border=False):
         for role, content in ss.chat:
-            st.chat_message(role).markdown(content)
+            st.chat_message(role).markdown(md(content))  # model replies quote dollars too
     st.pills(
         "Options",
         list(OPTION_MAP),
@@ -433,7 +438,7 @@ def render_overview(health: dict[str, Any]) -> None:
                 for a in card["alerts"][:2]:
                     st.markdown(
                         f":red-badge[:material/warning: {a['kind']}] {a['target_date']}: "
-                        f"{a['message']}"
+                        f"{md(a['message'])}"
                     )
                 if st.button(
                     f"Open {card['zone']}",
@@ -794,8 +799,11 @@ def render_schedule(zone: str, health: dict[str, Any]) -> None:
             else:
                 ss.flash = (
                     "success",
-                    f"Saved schedule #{res['schedule_id']} for {res['target_date']}: "
-                    f"{res['total_bid_mwh']:,.0f} MWh, $ at risk {fmt_usd(res['usd_at_risk'])}.",
+                    md(
+                        f"Saved schedule #{res['schedule_id']} for {res['target_date']}: "
+                        f"{res['total_bid_mwh']:,.0f} MWh, $ at risk "
+                        f"{fmt_usd(res['usd_at_risk'])}."
+                    ),
                 )
                 st.rerun()
 
@@ -817,9 +825,11 @@ def render_schedule(zone: str, health: dict[str, Any]) -> None:
             better = model_mape is None or sc["mape_hour"] <= model_mape
             icon = ":material/check_circle:" if better else ":material/warning:"
             st.markdown(
-                f"{icon} Scored: your schedule {fmt_pct(sc['mape_hour'])} hourly MAPE, "
-                f"{fmt_usd(sc['imbalance_usd'])} imbalance · model median "
-                f"{fmt_pct(model_mape)}, {fmt_usd(fsc['imbalance_usd']) if fsc else '—'}"
+                md(
+                    f"{icon} Scored: your schedule {fmt_pct(sc['mape_hour'])} hourly MAPE, "
+                    f"{fmt_usd(sc['imbalance_usd'])} imbalance · model median "
+                    f"{fmt_pct(model_mape)}, {fmt_usd(fsc['imbalance_usd']) if fsc else '—'}"
+                )
             )
         csv_frame = hourly.copy()
         csv_frame["bid_mw"] = pd.DataFrame(saved["hourly"])["bid_mw"].to_numpy()
