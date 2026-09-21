@@ -96,7 +96,7 @@ app/            NYISO archive client, weather, SQLite store, service (ingest / f
 frontend/       Streamlit UI (api client, keyword router, Gemini/GitHub chat layer, charts, app)
 scripts/        one-command data pulls and reports behind every headline number
 tests/          offline suite; tests/synthetic.py = NYISO-shaped synthetic archive
-deploy/         Caddyfile, seed script (backfill + first forecasts), GCE runbook (Phase 5)
+deploy/         Caddyfile, VM bootstrap script, seed script (backfill + first forecasts), GCE runbook
 data/           README only; fetched data is cached here and gitignored
 docs/           experiment log
 results/        per-run backtest outputs (gitignored except each named run's summary tables)
@@ -123,7 +123,8 @@ docker compose exec backend python deploy/seed.py --months 3 --forecast-days 3  
 ```
 
 Environment variables are documented in [.env.sample](.env.sample); working conventions in
-[CONTRIBUTING.md](CONTRIBUTING.md).
+[CONTRIBUTING.md](CONTRIBUTING.md). The public demo runs the production compose file on
+one small GCE VM behind Caddy: every command is in [deploy/RUNBOOK.md](deploy/RUNBOOK.md).
 
 ## The service
 

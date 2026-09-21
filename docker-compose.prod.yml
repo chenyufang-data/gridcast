@@ -14,6 +14,13 @@ services:
     environment:
       ADMIN_TOKEN: ${ADMIN_TOKEN:?set ADMIN_TOKEN in .env}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # tunables with their documented defaults (.env.sample); the bundle dir is set
+      # in the image (/data/models/tft) and the scheduler is on
+      MODEL_THREADS: ${MODEL_THREADS:-2}
+      TFT_MAX_AGE_DAYS: ${TFT_MAX_AGE_DAYS:-60}
+      RETENTION_MONTHS: ${RETENTION_MONTHS:-24}
+      WRITE_RATE_PER_MIN: ${WRITE_RATE_PER_MIN:-30}
+      WRITE_RATE_BURST: ${WRITE_RATE_BURST:-10}
     volumes:
       - app_data:/data
 
