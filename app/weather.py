@@ -1,6 +1,6 @@
 """Weather provider: day-ahead-issued temperature forecasts per NYISO zone from Open-Meteo.
 
-Leakage rule (docs/plan.md §2.4): a forecast for target day D may only use weather
+Leakage rule: a forecast for target day D may only use weather
 information available at the cutoff D-1 05:00 ET. Open-Meteo's *previous runs* API
 serves, for every hour, the value forecast ``N`` days earlier:
 

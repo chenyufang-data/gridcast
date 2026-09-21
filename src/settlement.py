@@ -1,6 +1,6 @@
 """Settlement in dollars: slot prices, imbalance cost, and the cost-aware bid quantile α.
 
-Market rule (docs/plan.md §1): the DAM bid for hour *h* is a single MW quantity; every
+Market rule (NYISO day-ahead market): the DAM bid for hour *h* is a single MW quantity; every
 deviation of the actual load from it is settled at the real-time price. Relative to a
 perfect-foresight bid the extra cost of a slot is::
 

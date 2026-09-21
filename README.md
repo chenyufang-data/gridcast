@@ -11,8 +11,8 @@ NYISO's own forecast, and fronts it all with a chat-driven web UI.
 PyTorch → ONNX Runtime · LightGBM · FastAPI · SQLite · Streamlit · Gemini on Vertex AI · Docker · Caddy.
 
 > **Status: model, backtest, service and UI are done; deployment to GCE (Phase 5) is next.**
-> The rules for what may become a headline number are in the decisions table of
-> [CLAUDE.md](CLAUDE.md) (the build plan itself stays local); every number below has a
+> The rules for what may become a headline number are in
+> [CONTRIBUTING.md](CONTRIBUTING.md#reporting-rules); every number below has a
 > one-command script in [scripts/](scripts/README.md) and an entry in
 > [docs/experiments.md](docs/experiments.md).
 > This is the US-native successor of
@@ -55,7 +55,7 @@ Hourly MAPE (%), lower is better; `scripts/skill_baselines.py --name tft_full` a
 
 Dollars at risk over the year, Σ |deviation × (RT − DA)| across the 11 priced zones (`scripts/imbalance_report.py`): NYISO pre-close $158M, TFT $154M, trees $181M, best naive $335M. Signed totals against perfect foresight have 95% bootstrap intervals about ±$26M wide, so they do not rank strategies.
 
-What the table says, under the reporting rules in the plan:
+What the table says, under the reporting rules in [CONTRIBUTING.md](CONTRIBUTING.md#reporting-rules):
 
 - **The TFT matches NYISO's own day-ahead forecast.** Pooled over 12 zones and 12 months it
   is level with the ISO's pre-close forecast (4.80 vs 4.85; paired daily
@@ -97,7 +97,7 @@ tests/          offline suite; tests/synthetic.py = NYISO-shaped synthetic archi
 deploy/         Caddyfile, seed script (backfill + first forecasts), GCE runbook (Phase 5)
 data/           README only; fetched data is cached here and gitignored
 docs/           experiment log
-results/        per-run backtest outputs (gitignored except the default run's summaries)
+results/        per-run backtest outputs (gitignored except each named run's summary tables)
 ```
 
 ## Quickstart

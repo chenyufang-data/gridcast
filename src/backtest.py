@@ -1,6 +1,6 @@
 """Rolling day-ahead backtest: one fresh retrain per (zone, day) as of the D-1 05:00 ET cutoff.
 
-Protocol (docs/plan.md §3): for every target day ``D`` in the range and every zone,
+Protocol (the README results section): for every target day ``D`` in the range and every zone,
 train on the zone's slots ending at or before the cutoff (the leakage guard in
 :func:`models.forecast_day` enforces it), forecast the 96 (92/100) slots of ``D`` with
 the median, the P10/P90 band and the α-quantile bid, where α is the newsvendor ratio

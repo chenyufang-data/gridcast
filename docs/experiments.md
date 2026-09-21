@@ -238,7 +238,7 @@ history: 5.56).
   real-time prices sit below day-ahead most of the time, so the cost-aware bid is
   slightly *short* of the median.
 - The signed totals are noise: every interval overlaps every other. **The α-bid does not
-  meet the headline rule** (docs/plan.md §4) and stays a secondary feature of the product.
+  meet the headline rule** (CONTRIBUTING.md, reporting rules) and stays a secondary feature of the product.
 - Σ |dev × spread| (dollars at risk) follows accuracy: ISO $158M ≈
   TFT $154M < trees $181M < naive ≥ $335M.
 
@@ -264,7 +264,7 @@ Open items, in the order they are likely to pay off:
 
 1. A second weather station for the large zones, and zone-specific variables for the
    small upstate zones with industrial load (MHK VL, MILLWD).
-2. The ISO forecast as a feature is excluded by decision (docs/plan.md Q8). A labelled
+2. The ISO forecast as a feature is excluded by decision (it is the benchmark). A labelled
    experiment would almost certainly close most of the gap; it should stay a separate,
    clearly named variant if ever run.
 3. Blending model and `isolf_pre` per zone with weights fitted on trailing days.

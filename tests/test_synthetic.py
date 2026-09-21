@@ -1,6 +1,6 @@
 """The synthetic archive must reproduce the observed NYISO layouts and gotchas.
 
-Each gotcha in docs/plan.md §2.2 has a case here, so the Phase 1 normalizers can be
+Each gotcha in data/README.md has a case here, so the Phase 1 normalizers can be
 tested against a generator that is itself verified.
 """
 

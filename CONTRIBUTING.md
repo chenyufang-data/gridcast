@@ -69,4 +69,22 @@ $uv = ".\.venv\Scripts\uv.exe"
 - Commit style `type(scope): summary` (`feat`, `fix`, `docs`, `test`, `ci`, `chore`,
   `refactor`).
 - Every headline number in README or docs states its evaluation window and has a
-  one-command script under `scripts/`. Headline rules: `docs/plan.md` §4.
+  one-command script under `scripts/` (the reporting rules below).
+
+## Reporting rules
+
+What may become a headline number, in the README, the docs, the UI and any video:
+
+- **Accuracy.** Hourly MAPE against NYISO's own pre-close forecast (`isolf_pre`, the file
+  named D−1) on identical zone-days. If the ISO's forecast is better, MAPE is not the
+  headline; if the paired difference is not significant, the claim is "matches", never
+  "beats".
+- **Dollars.** The cost-aware α-bid may lead only when it is measured in settled dollars,
+  beats the strongest baseline including `isolf + α`, and α was estimated strictly before
+  each day's cutoff. Otherwise it is a secondary result.
+- **Window and script.** Every headline states its evaluation window and is reproduced by
+  one command under `scripts/`, with an entry in `docs/experiments.md`.
+- **Data.** Wherever data appears, credit the source with a link (NYISO public MIS
+  archive; Open-Meteo); never redistribute NYISO bytes; never use the NYISO logo.
+- **The ISO forecast is never a feature.** It is the benchmark; a model that reads it
+  would be a different experiment and must be named as such.

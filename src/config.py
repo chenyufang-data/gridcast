@@ -1,7 +1,7 @@
 """Locked project constants: market rules, zones, archive layout, backtest window.
 
-Every value here was decided in docs/plan.md (approved 2026-09-17). Change the plan
-first, then this file. Zone names and PTIDs were verified against the live archive
+Every value here was decided on 2026-09-17 and is documented in the README. Change the
+documentation first, then this file. Zone names and PTIDs were verified against the live archive
 files of 2026-09-15.
 """
 
@@ -63,7 +63,7 @@ def archive_url(file_type: str, name: str) -> str:
     return f"{NYISO_ARCHIVE_BASE}/{ARCHIVE_DIRS[file_type]}/{name}"
 
 
-# --- backtest (docs/plan.md §3) ----------------------------------------------------
+# --- backtest protocol (README, results) ----------------------------------------------------
 # 24 months of history: every backtest day trains on a full 365-day window (docs/experiments.md
 # section 2c measured -0.26 pooled MAPE against a 2025-06-01 start; `--history-start` reproduces it)
 WARMUP_START = date(2024, 9, 1)

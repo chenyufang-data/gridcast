@@ -15,7 +15,7 @@ Strategies (all leakage-free: α and any adjustment use only days <= D-2):
   model_alpha_bid                        our α-quantile forecast (quantile LightGBM at α)
   model_alpha_emp                        our median scaled by the trailing α-quantile of actual/pred
 
-Headline rule (docs/plan.md §4): the α-bid may lead only if it beats every other
+Headline rule (CONTRIBUTING.md, reporting rules): the α-bid may lead only if it beats every other
 strategy here in pooled dollars over the full range; the last lines say whether it did.
 """
 

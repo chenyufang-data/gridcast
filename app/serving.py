@@ -1,6 +1,6 @@
 """The served models: the ONNX TFT bundle (primary) and the LightGBM trees (fallback).
 
-Decision (CLAUDE.md, 2026-09-18): the Temporal Fusion Transformer is fitted and exported
+Decision (2026-09-18): the Temporal Fusion Transformer is fitted and exported
 on the laptop (``scripts/export_tft.py``) and its two-file bundle is copied to the data
 volume; the VM runs it with onnxruntime only. The trees are trained on demand on the VM
 and take over whenever the bundle is missing, stale, rejected or lacks a zone.

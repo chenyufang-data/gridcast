@@ -3,7 +3,7 @@
 Run locally:   uvicorn app.main:app --reload
 Docs UI:       http://127.0.0.1:8000/docs
 
-Access model (docs/plan.md §5): every GET is public; POST / PATCH / DELETE require the
+Access model: every GET is public; POST / PATCH / DELETE require the
 ``X-Admin-Token`` header (``ADMIN_TOKEN`` in the environment) and pass a per-IP token
 bucket. Data: NYISO public MIS archive, fetched at runtime and never redistributed;
 responses carry derived aggregates and model outputs only.

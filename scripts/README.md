@@ -1,7 +1,7 @@
 # scripts/ — one-command reports
 
 Every headline number quoted in the README or the UI must be reproducible by one of
-these scripts on the stated window (docs/plan.md §4). All of them run offline once the
+these scripts on the stated window (CONTRIBUTING.md, reporting rules). All of them run offline once the
 two data scripts have populated `data/` (gitignored: NYISO and Open-Meteo data are
 fetched, never redistributed).
 

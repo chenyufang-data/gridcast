@@ -36,7 +36,7 @@ os.environ.setdefault("API_BASE", "http://127.0.0.1:9")
 
 from tests.synthetic import SyntheticNYISO  # noqa: E402
 
-# DST transition days inside the backtest range (docs/plan.md §2.2)
+# DST transition days inside the backtest range (data/README.md, DST gotchas)
 FALL_BACK_DAY = date(2025, 11, 2)  # 25 local hours: 01:xx listed twice (EDT then EST)
 SPRING_FORWARD_DAY = date(2026, 3, 8)  # 23 local hours: no 02:xx
 

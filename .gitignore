@@ -62,6 +62,7 @@ results/tft_full/*
 *~
 .claude/
 
-# local planning documents (the plan and the demo runbook stay on this machine)
+# local planning documents (the plan, the demo runbook and the session handoff stay on this machine)
 docs/plan.md
 docs/demo_video_runbook.md
+CLAUDE.md

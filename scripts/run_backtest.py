@@ -11,7 +11,7 @@
 Requires data/processed (scripts/backfill.py) and, unless --no-weather, data/weather.csv
 (scripts/fetch_weather.py). Results: results/<name>/results.csv (+ per-day cache) and
 results/<name>/summary.csv with hourly and 15-min MAPE per zone. Every headline number
-in the README must come from this script or its siblings (docs/plan.md §4).
+in the README must come from this script or its siblings (CONTRIBUTING.md, reporting rules).
 """
 
 from __future__ import annotations
