@@ -12,7 +12,8 @@ PyTorch → ONNX Runtime · LightGBM · FastAPI · SQLite · Streamlit · Gemini
 
 ![Forecast view: the served TFT's median with its P10–P90 band, the α-bid, NYISO's pre-close forecast and the actual load for one day, a live tree retrain drawn next to it, and both versions scored on the same actuals](docs/img/forecast.png)
 
-> **Status: model, backtest, service and UI are done; deployment to GCE (Phase 5) is next.**
+> **Live demo: <https://gridcast.cyfang.org>** (one small GCE VM; forecasts and scores refresh
+> every morning). Model, backtest, service, UI and deployment are done; the demo video is next.
 > The rules for what may become a headline number are in
 > [CONTRIBUTING.md](CONTRIBUTING.md#reporting-rules); every number below has a
 > one-command script in [scripts/](scripts/README.md) and an entry in
