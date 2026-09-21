@@ -69,3 +69,6 @@ CLAUDE.md
 
 # README screenshots (the only images in the repo)
 !docs/img/*.png
+
+# the deploy tarball built by git archive (deploy/RUNBOOK.md step 3)
+gridcast.tar.gz
