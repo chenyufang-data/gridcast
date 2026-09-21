@@ -109,6 +109,13 @@ def fmt_usd(x: float | None) -> str:
     return "—" if x is None else f"${x:,.0f}"
 
 
+def fmt_usd_short(x: float | None) -> str:
+    """Card-sized dollars: six figures and up as thousands, so metrics never truncate."""
+    if x is None:
+        return "—"
+    return f"${x / 1000:,.0f}k" if abs(x) >= 100_000 else f"${x:,.0f}"
+
+
 def fmt_mw(x: float | None) -> str:
     return "—" if x is None else f"{x:,.0f} MW"
 
@@ -428,7 +435,7 @@ def render_overview(health: dict[str, Any]) -> None:
                 )
                 m[1].metric(
                     "7-day imbalance",
-                    "n/a" if card["is_total"] else fmt_usd(week["imbalance_usd"]),
+                    "n/a" if card["is_total"] else fmt_usd_short(week["imbalance_usd"]),
                 )
                 if latest:
                     badge = model_badge(latest["model"])

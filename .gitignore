@@ -72,3 +72,4 @@ CLAUDE.md
 
 # the deploy tarball built by git archive (deploy/RUNBOOK.md step 3)
 gridcast.tar.gz
+docs/project_report.md
