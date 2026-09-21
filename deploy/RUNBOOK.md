@@ -152,7 +152,7 @@ is expected and noisy in the backend log.
 sudo docker compose -f docker-compose.prod.yml exec backend mkdir -p /data/models/tft
 sudo docker compose -f docker-compose.prod.yml cp /tmp/tft.onnx backend:/data/models/tft/tft.onnx
 sudo docker compose -f docker-compose.prod.yml cp /tmp/tft.json backend:/data/models/tft/tft.json
-curl -s http://127.0.0.1:8000/models; echo        # "loaded": true, "stale": false
+curl -s http://127.0.0.1:8000/models; echo        # "loaded": true, "stale": false (the registry re-reads the folder)
 nohup sudo docker compose -f docker-compose.prod.yml exec -T backend \
   python deploy/seed.py --months 15 --forecast-days 30 > /tmp/seed.log 2>&1 &
 tail -f /tmp/seed.log

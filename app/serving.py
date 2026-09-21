@@ -71,9 +71,9 @@ class ModelRegistry:
                 if self.tft is not None:
                     log.warning("TFT bundle removed from %s; serving the trees", self.bundle_dir)
                 self.tft, self.error, self._signature = None, "bundle missing", None
-                return self.status()
+                return self._describe()
             if sig == self._signature and not force:
-                return self.status()
+                return self._describe()
             try:
                 self.tft = OnnxTFT.load(self.bundle_dir)
                 self.error = None
@@ -82,7 +82,7 @@ class ModelRegistry:
                 self.error = f"rejected: {exc}"
                 log.error("TFT bundle %s rejected: %s", self.bundle_dir, exc)
             self._signature = sig
-            return self.status()
+            return self._describe()
 
     # --- freshness --------------------------------------------------------------------
     def fit_cutoff(self) -> pd.Timestamp | None:
@@ -110,6 +110,11 @@ class ModelRegistry:
         return self.tft, None
 
     def status(self, target: date | None = None) -> dict[str, Any]:
+        """Re-read the folder first, so a bundle copied in shows up in /health and /models."""
+        self.reload()
+        return self._describe(target)
+
+    def _describe(self, target: date | None = None) -> dict[str, Any]:
         tft: dict[str, Any] = {
             "bundle_dir": str(self.bundle_dir),
             "loaded": self.tft is not None,
