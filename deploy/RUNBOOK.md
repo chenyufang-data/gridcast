@@ -55,7 +55,7 @@ Write the address down: it goes into the DNS record in step 7.
 ```powershell
 # web from anywhere; SSH only from Google's IAP range; then close the default's open 22
 gcloud compute firewall-rules create gridcast-web --network default --direction INGRESS `
-  --allow tcp:80,tcp:443 --target-tags gridcast --source-ranges 0.0.0.0/0
+  --allow "tcp:80,tcp:443" --target-tags gridcast --source-ranges 0.0.0.0/0
 gcloud compute firewall-rules create gridcast-ssh-iap --network default --direction INGRESS `
   --allow tcp:22 --target-tags gridcast --source-ranges 35.235.240.0/20
 gcloud compute firewall-rules delete default-allow-ssh --quiet
