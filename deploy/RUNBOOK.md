@@ -220,11 +220,30 @@ scheduler catches up the missed days on its own.
   then `sudo docker compose -f docker-compose.prod.yml up -d --build`. The data volume
   survives and the store migrates itself at startup. `sudo docker system prune -f`
   afterwards drops old image layers.
-- **Monthly TFT refresh** (the bundle is served for 60 days after its fit cutoff, so the
-  first refresh is due by mid-November). Laptop: `python scripts/export_tft.py`, then
-  `gcloud compute scp data/models/tft/tft.onnx data/models/tft/tft.json gridcast:/tmp/ --tunnel-through-iap`
-  and the two `cp` lines of step 6. The registry notices the changed files by itself;
-  `curl -s http://127.0.0.1:8000/models` confirms the new version.
+- **Monthly TFT refresh.** The bundle is served for 60 days after its fit cutoff
+  (`TFT_MAX_AGE_DAYS`), then the trees take over and the sidebar says "stale"; refresh
+  once a month. Laptop (torch venv, GPU): bring the data up to date, keep the old bundle
+  for a rollback, export, copy:
+  ```powershell
+  .\.venv\Scripts\python.exe scripts\backfill.py
+  .\.venv\Scripts\python.exe scripts\fetch_weather.py
+  Copy-Item data\models\tft data\models\tft_<old fit date> -Recurse
+  .\.venv\Scripts\python.exe scripts\export_tft.py     # ~2 min; verifies ONNX vs torch
+  gcloud compute scp data\models\tft\tft.onnx data\models\tft\tft.json gridcast:/tmp/ --tunnel-through-iap
+  ```
+  VM: stage both files, then swap them in one step so the backend never sees a new model
+  file next to an old manifest (the loader checks the SHA-256 and would reject the pair):
+  ```bash
+  cd /opt/gridcast
+  sudo docker compose -f docker-compose.prod.yml exec backend mkdir -p /data/models/tft.new
+  sudo docker compose -f docker-compose.prod.yml cp /tmp/tft.onnx backend:/data/models/tft.new/tft.onnx
+  sudo docker compose -f docker-compose.prod.yml cp /tmp/tft.json backend:/data/models/tft.new/tft.json
+  sudo docker compose -f docker-compose.prod.yml exec backend sh -c \
+    'mv /data/models/tft.new/tft.onnx /data/models/tft/tft.onnx && mv /data/models/tft.new/tft.json /data/models/tft/tft.json && rmdir /data/models/tft.new'
+  curl -s http://127.0.0.1:8000/models; echo     # new version string, "stale": false
+  ```
+  The registry re-reads the folder by itself; the next 04:30 ET job forecasts with the
+  new bundle. Rollback = the same copy from the saved folder.
 - **Admin calls from the laptop.** Tunnel the backend port, then use `/docs` with the
   `X-Admin-Token` header:
   `gcloud compute ssh gridcast --tunnel-through-iap -- -N -L 8000:127.0.0.1:8000`
