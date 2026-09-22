@@ -3,8 +3,9 @@ client caches and falls back the way the real archive behaves, DST days survive.
 
 from __future__ import annotations
 
+import os
 import zipfile
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import numpy as np
@@ -13,7 +14,7 @@ import pytest
 
 from app import nyiso
 from app.nyiso import ArchiveClient, NotAvailable
-from src.config import NYISO_ARCHIVE_BASE, ZONES, daily_filename, monthly_zip_name
+from src.config import MARKET_TZ, NYISO_ARCHIVE_BASE, ZONES, daily_filename, monthly_zip_name
 from tests.conftest import FALL_BACK_DAY, SPRING_FORWARD_DAY
 from tests.synthetic import SyntheticNYISO
 
@@ -295,10 +296,27 @@ def test_client_current_month_uses_partial_zip_then_daily(tmp_path: Path) -> Non
     client.day_csv("pal", date(2025, 9, 4))
     client.day_csv("pal", date(2025, 9, 10))  # a recent day: still served from the partial zip
     assert len(calls) == 2
+
+    # a partial zip downloaded *during* a day holds a truncated copy of it: for that day
+    # the client takes the daily file (final once the day is over) instead
+    partial = tmp_path / "cache" / "pal" / "20250901pal_csv.zip.partial"
+    during_sep_10 = datetime(2025, 9, 10, 12, 0, tzinfo=MARKET_TZ).timestamp()
+    os.utime(partial, (during_sep_10, during_sep_10))
+    assert client.day_csv("pal", date(2025, 9, 9)) == synth.pal_csv(date(2025, 9, 9))
+    assert len(calls) == 2  # the 9th ended before the download: the zip is trusted
+    assert client.day_csv("pal", date(2025, 9, 10)) == synth.pal_csv(date(2025, 9, 10))
+    assert calls[-1].endswith("20250910pal.csv")
+    assert (tmp_path / "cache" / "pal" / "20250910pal.csv").exists()
+    # no daily file any more (older than ~11 days) and a stale zip: the zip is refreshed
+    during_sep_03 = datetime(2025, 9, 3, 12, 0, tzinfo=MARKET_TZ).timestamp()
+    os.utime(partial, (during_sep_03, during_sep_03))
+    assert client.day_csv("pal", date(2025, 9, 3)) == synth.pal_csv(date(2025, 9, 3))
+    assert [u.rsplit("/", 1)[1] for u in calls[-2:]] == ["20250903pal.csv", "20250901pal_csv.zip"]
+    assert len(calls) == 5
     # today is fetched fresh every time and never cached
     assert client.day_csv("pal", today) == synth.pal_csv(today)
     assert client.day_csv("pal", today) == synth.pal_csv(today)
-    assert [u.rsplit("/", 1)[1] for u in calls[2:]] == ["20250917pal.csv", "20250917pal.csv"]
+    assert [u.rsplit("/", 1)[1] for u in calls[5:]] == ["20250917pal.csv", "20250917pal.csv"]
     assert not (tmp_path / "cache" / "pal" / "20250917pal.csv").exists()
     with pytest.raises(NotAvailable, match="not published"):
         client.day_csv("pal", today + timedelta(days=1))

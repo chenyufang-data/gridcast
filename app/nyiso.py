@@ -34,7 +34,8 @@ import os
 import time
 import zipfile
 from collections.abc import Callable, Iterable
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
+from datetime import time as dtime
 from pathlib import Path
 
 import numpy as np
@@ -58,6 +59,9 @@ log = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CACHE_DIR = Path(os.environ.get("NYISO_CACHE_DIR") or PROJECT_ROOT / "data" / "cache")
+# The current month's zip is rebuilt ~05:00 ET every morning with the previous day complete
+# and the new day partial; a cached copy is trusted for a day only from this time on.
+PARTIAL_ZIP_REBUILD_ET = dtime(5, 30)
 
 PTID_ZONE: dict[int, str] = {ptid: zone for zone, ptid in ZONE_PTID.items()}
 _TZ_OFFSET_HOURS = {"EDT": 4, "EST": 5}  # hours behind UTC
@@ -182,7 +186,7 @@ class ArchiveClient:
                 partial_path.unlink(missing_ok=True)
             return self._read_from_zip(final_path, member)
 
-        if partial_path.exists():
+        if self._partial_covers(partial_path, day):
             text = self._read_from_zip(partial_path, member)
             if text is not None:
                 return text
@@ -190,6 +194,22 @@ class ArchiveClient:
         if self._download_to_cache(file_type, zip_name, cache_as=partial_path.name) is None:
             return None
         return self._read_from_zip(partial_path, member)
+
+    @staticmethod
+    def _partial_covers(partial_path: Path, day: date) -> bool:
+        """Whether a cached partial month zip can hold the *complete* day.
+
+        The archive rebuilds the current month's zip every morning (~05:00 ET) with the
+        day so far, so a copy downloaded during `day` holds a truncated `day`. Only a copy
+        downloaded after the next morning's rebuild is trusted for that day.
+        """
+        if not partial_path.exists():
+            return False
+        downloaded = datetime.fromtimestamp(partial_path.stat().st_mtime, tz=UTC)
+        complete_after = datetime.combine(
+            day + timedelta(days=1), PARTIAL_ZIP_REBUILD_ET, tzinfo=MARKET_TZ
+        )
+        return downloaded >= complete_after
 
     # --- public API ----------------------------------------------------------------
     def day_csv(self, file_type: str, day: date) -> str:
@@ -214,8 +234,10 @@ class ArchiveClient:
             partial_path = self.cache_path(
                 file_type, monthly_zip_name(file_type, day.replace(day=1)) + ".partial"
             )
-            text = self._read_from_zip(partial_path, name) if partial_path.exists() else None
-            if text is None:
+            text = None
+            if self._partial_covers(partial_path, day):
+                text = self._read_from_zip(partial_path, name)
+            if text is None:  # a past day's daily file is final: fetch it, else refresh the zip
                 path = self._download_to_cache(file_type, name)
                 if path is not None:
                     return path.read_text(encoding="utf-8")

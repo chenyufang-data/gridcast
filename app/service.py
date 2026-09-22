@@ -39,7 +39,7 @@ from app.serving import (
 )
 from models import SLOT, cutoff_for, forecast_day, local_midnight_utc
 from models.tft_data import prepare_zone, series_asof
-from src.config import FILE_TYPES, MARKET_TZ, NYCA
+from src.config import FILE_TYPES, MARKET_TZ, NYCA, ZONES
 from src.metrics import mape
 from src.settlement import MWH_PER_MW_SLOT, estimate_alpha, settle, slot_prices
 
@@ -70,6 +70,15 @@ FILE_TABLES = {
     "damlbmp_zone": "da_hourly",
     "rtlbmp_zone": "rt_hourly",
     "isolf": "isolf",
+}
+# Rows a complete day must reach to be logged as ingested (90 % of a normal day, so DST
+# days pass); fewer means a truncated file and the day is retried by the next catch-up.
+PARTIAL_DAY_MIN_ROWS = {
+    "pal": int(0.9 * 96 * (len(ZONES) + 1)),  # 15-min slots, 11 zones + NYCA
+    "realtime_zone": int(0.9 * 96 * len(ZONES)),
+    "damlbmp_zone": int(0.9 * 24 * len(ZONES)),
+    "rtlbmp_zone": int(0.9 * 24 * len(ZONES)),
+    "isolf": int(0.9 * 6 * 24 * (len(ZONES) + 1)),  # the file named D covers D..D+5
 }
 MODELS = ("auto", "tft", "lgbm")
 
@@ -201,11 +210,17 @@ def ingest_days(
                     conn.rollback()
                     continue
                 if day < today:
+                    # a truncated day (a stale partial zip, a file caught mid-rebuild) is
+                    # stored but logged as missing, so the next catch-up fetches it again
+                    status = "ok" if n >= PARTIAL_DAY_MIN_ROWS[ft] else "missing"
+                    if status == "missing":
+                        log.warning("%s %s: only %d rows stored; will retry", ft, day, n)
+                        s["missing"].append(day.isoformat())
                     db.upsert(
                         conn,
                         "ingest_log",
                         ("file_type", "day", "status", "rows", "fetched_at"),
-                        [(ft, day.isoformat(), "ok", n, db.now_text())],
+                        [(ft, day.isoformat(), status, n, db.now_text())],
                     )
                 conn.commit()
                 s["days"] += 1
