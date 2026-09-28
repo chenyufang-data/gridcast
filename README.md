@@ -10,7 +10,10 @@ fallback) with P10–P90 bands into a cost-aware DAM bid, scores both in dollars
 NYISO's own forecast, and fronts it all with a chat-driven web UI.
 PyTorch → ONNX Runtime · LightGBM · FastAPI · SQLite · Streamlit · Gemini on Vertex AI · Docker · Caddy.
 
-![Forecast view: the served TFT's median with its P10–P90 band, the α-bid, NYISO's pre-close forecast and the actual load for one day, a live tree retrain drawn next to it, and both versions scored on the same actuals](docs/img/forecast.png)
+[![Fifteen seconds of the two-minute tour: a live LightGBM retrain lands as a second line next to the served TFT and is scored on the same actuals](docs/img/demo.gif)](https://gridcast.cyfang.org)
+
+*Fifteen seconds of the two-minute tour. The full tour, with captions, plays on the
+Overview of the live demo.*
 
 > **Live demo: <https://gridcast.cyfang.org>** (one small GCE VM; forecasts and scores refresh
 > every morning). Model, backtest, service, UI and deployment are done; the demo video is next.

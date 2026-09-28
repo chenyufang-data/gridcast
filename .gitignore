@@ -76,3 +76,10 @@ docs/project_report.md
 
 # demo video recordings and cards (docs/demo_video_runbook.md)
 video/
+
+# video masters dropped into docs/ stay local; the web copy ships in frontend/media/
+docs/*.mp4
+docs/*.mkv
+docs/*.mov
+docs/*.wav
+docs/*.srt
