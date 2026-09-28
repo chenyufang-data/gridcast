@@ -518,10 +518,17 @@ def _run_forecast(zone: str, target: date | None, model: str, label: str) -> Non
                 if fc.get("primary", True)
                 else " as an extra version: the served model's forecast stays the day's primary"
             )
+            score = fc.get("score") or {}
+            scored = (
+                f" Scored on the day's actuals: {fmt_pct(score['mape_hour'])} hourly MAPE"
+                f" (NYISO {fmt_pct(score.get('isolf_mape_hour'))})."
+                if score.get("mape_hour") is not None
+                else ""
+            )
             st.session_state.flash = (
                 "success",
                 f"{'Stored' if fc['new'] else 'Already stored'}: {fc['target_date']} with "
-                f"{model_kind(fc['model'])}{why}, version {fc['model_version']}{role}.",
+                f"{model_kind(fc['model'])}{why}, version {fc['model_version']}{role}.{scored}",
             )
             st.session_state.target = date.fromisoformat(fc["target_date"])
     zones_cached.clear()
@@ -898,7 +905,7 @@ def _backfill(zone: str, days: list[date]) -> None:
         "warning" if errors else "success",
         "; ".join(errors)
         if errors
-        else f"Forecast {len(days)} day(s) with the served model; scoring runs each morning.",
+        else f"Forecast {len(days)} day(s) with the served model and scored them on their actuals.",
     )
     st.rerun()
 

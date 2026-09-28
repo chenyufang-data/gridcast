@@ -148,8 +148,9 @@ cutoff (D−1 05:00 ET), and keeps everything in one SQLite file on the data vol
   scored forecasts of the same model (split conformal, as in the backtest).
 - **Scoring.** Each morning the previous day's forecasts and DAM schedules are scored in
   hourly MAPE and in dollars (deviation × (RT − DA) per 15-min slot), next to NYISO's
-  pre-close forecast on the same day; alerts fire on MAPE above 10% or an imbalance
-  cost above the trailing P90.
+  pre-close forecast on the same day; a forecast made for a past day (a live retrain, a
+  backfill) is scored the moment it is stored; alerts fire on MAPE above 10% or an
+  imbalance cost above the trailing P90.
 - **Schedule.** 04:30 ET forecast tomorrow (weather refresh + today's partial load first),
   06:30 ET catch up and score, 08:30 ET fetch tomorrow's ISO forecast and DA prices,
   monthly pruning past the retention window (24 months; forecasts and scores are kept).

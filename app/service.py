@@ -590,6 +590,16 @@ def generate_forecast(zone: str, target: date | None = None, model: str = "auto"
                 conn.commit()
             primary = primary_forecast(conn, zone, target)
             is_primary = primary is not None and primary["id"] == fid
+            score: dict[str, Any] | None = None
+            if is_new and target < TODAY():
+                # a past day (a retrain, a backfill): score it now on whatever actuals
+                # exist; the morning job re-scores anything still below full coverage
+                score = score_forecast(conn, fid)
+                if score is not None:
+                    score["primary"] = is_primary
+                    if is_primary:
+                        _refresh_alerts(conn, score)
+                    conn.commit()
             log.info(
                 "forecast %s %s: %s v%s (%s, %s), alpha %.3f, band x%.3f/%.3f",
                 zone,
@@ -620,6 +630,7 @@ def generate_forecast(zone: str, target: date | None = None, model: str = "auto"
         "history": [h0.isoformat(), h1.isoformat()],
         "weather_features": hourly_w is not None,
         "fallback_reason": fallback_reason,
+        "score": score,
         "values": _value_rows(rows),
     }
 
@@ -1035,8 +1046,9 @@ def _refresh_alerts(conn: sqlite3.Connection, score: dict[str, Any]) -> list[dic
 def score_pending(zone: str | None = None, today: date | None = None) -> dict[str, Any]:
     """Score every forecast version and schedule that actuals now cover better than before.
 
-    Overlays are scored like the primary so a live retrain gets its own number the next
-    morning; only the primary version raises alerts.
+    Overlays are scored like the primary (a forecast of a past day is already scored when
+    it is stored; this pass scores the days whose actuals arrived since and re-scores
+    anything below full coverage); only the primary version raises alerts.
     """
     today = today or TODAY()
     lo = (today - timedelta(days=SCORE_WINDOW_DAYS)).isoformat()

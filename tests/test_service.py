@@ -202,15 +202,17 @@ def test_nyca_forecast_has_no_prices(client: TestClient) -> None:
 # ---------------------------------------------------------------------------- scoring
 @pytest.mark.slow
 def test_scoring_in_mape_and_dollars(client: TestClient) -> None:
+    # forecasts of a past day are scored the moment they are stored, so the morning job
+    # (and the admin call) find nothing left to do
     r = client.post("/admin/score", headers=TOKEN)
     assert r.status_code == 200, r.text
-    out = r.json()
-    nyc = next(s for s in out["forecasts"] if s["zone"] == "N.Y.C.")
+    assert r.json()["forecasts"] == []
+    nyc = client.get(f"/zones/nyc/forecasts/{TARGET}").json()["score"]
     assert nyc["coverage"] == 1.0 and nyc["mape_hour"] is not None and nyc["mape_slot"] is not None
     assert nyc["imbalance_usd"] is not None and nyc["da_cost_usd"] > 0
     assert nyc["isolf_mape_hour"] is not None and nyc["isolf_imbalance_usd"] is not None
     assert 0 <= nyc["band_coverage"] <= 100
-    nyca = next(s for s in out["forecasts"] if s["zone"] == NYCA)
+    nyca = client.get(f"/zones/nyca/forecasts/{TARGET}").json()["score"]
     assert nyca["imbalance_usd"] is None and nyca["mape_hour"] is not None
 
     hist = client.get("/zones/nyc/scores").json()
@@ -335,24 +337,29 @@ def test_schedule_flow(client: TestClient) -> None:
 # ---------------------------------------------------------------------------- calibration + alerts
 @pytest.mark.slow
 def test_conformal_band_and_alerts_after_history(client: TestClient) -> None:
+    scores = []
     for k in range(8):
         target = date(2025, 9, 2) + timedelta(days=k)
         fc = service.generate_forecast("WEST", target, "lgbm")
         assert len(fc["values"]) == 96
+        assert fc["score"]["coverage"] == 1.0  # a past day is scored on creation
+        scores.append(fc["score"])
+    # eight scored days of the same family feed the conformal rescaling of the next one
     fresh = service.generate_forecast("WEST", date(2025, 9, 11), "lgbm")
     s10, s90 = fresh["band_scale"]["p10"], fresh["band_scale"]["p90"]
     assert (s10, s90) != (1.0, 1.0) and 0.5 <= s10 <= 2.0 and 0.5 <= s90 <= 2.0
     vals = pd.DataFrame(fresh["values"])
     assert (vals["p10"] <= vals["predicted"]).all() and (vals["predicted"] <= vals["p90"]).all()
+    scores.append(fresh["score"])
 
     out = client.post("/admin/score", headers=TOKEN).json()
-    west = [s for s in out["forecasts"] if s["zone"] == "WEST"]
-    assert len(west) == 9
+    assert [s for s in out["forecasts"] if s["zone"] == "WEST"] == []  # nothing left
+    assert len([s for s in client.get("/zones/west/scores").json()]) >= 9
     # the synthetic series is easy: no MAPE alert; the $ alert needs 10 scored days
     assert out["alerts"] == [] and client.get("/alerts").json() == []
     conn = db.connect()
     try:
-        forced = dict(west[-1], mape_hour=12.5)
+        forced = dict(scores[-1], mape_hour=12.5)
         alerts = service._refresh_alerts(conn, forced)
         conn.commit()
     finally:
