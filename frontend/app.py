@@ -194,6 +194,7 @@ def init_state() -> None:
     ss.setdefault("granularity", "hour")
     ss.setdefault("chat", [("assistant", WELCOME)])
     ss.setdefault("chat_open", st.query_params.get("guide") == "open")
+    ss.setdefault("demo_open", False)
     ss.setdefault("limit_told", False)
     ss.setdefault("user_key", uuid.uuid4().hex)
     ss.setdefault("flash", None)
@@ -259,10 +260,31 @@ def _on_zone() -> None:
 
 def _open_chat() -> None:
     st.session_state.chat_open = True
+    st.session_state.demo_open = False  # one dialog at a time
 
 
 def _close_chat() -> None:
     st.session_state.chat_open = False
+
+
+def _open_demo() -> None:
+    st.session_state.demo_open = True
+    st.session_state.chat_open = False
+
+
+def _close_demo() -> None:
+    st.session_state.demo_open = False
+
+
+@st.dialog("Two-minute tour", width="large", icon=":material/play_circle:", on_dismiss=_close_demo)
+def demo_dialog() -> None:
+    """The tour video, opened from the Overview's button; the page stays clean otherwise."""
+    st.video(str(DEMO_VIDEO), autoplay=True)
+    st.caption(
+        "What a day-ahead bid is, how the forecast is made as of the 05:00 ET cutoff, a live "
+        "retrain landing next to the served model, a bid sheet with its dollars at risk, and "
+        "a week of forecast versus actual next to NYISO's own forecast. Captions are burned in."
+    )
 
 
 def _on_option() -> None:
@@ -426,13 +448,18 @@ def render_overview(health: dict[str, Any]) -> None:
     k[3].metric("Zones with alerts", sum(1 for c in cards if c["alert"]))
 
     if DEMO_VIDEO.exists():
-        player, blurb = st.columns([1.5, 1], gap="large", vertical_alignment="center")
-        player.video(str(DEMO_VIDEO))
-        blurb.markdown(
-            "**Two-minute tour.** What a day-ahead bid is, how the forecast is made as of "
-            "the 05:00 ET cutoff, a live retrain landing next to the served model, a bid "
-            "sheet with its dollars at risk, and a week of forecast versus actual next to "
-            "NYISO's own forecast. Captions are burned in."
+        tour = st.columns([1.1, 3], vertical_alignment="center")
+        tour[0].button(
+            "Watch the 2-min demo",
+            key="demo_btn",
+            icon=":material/play_circle:",
+            type="primary",
+            on_click=_open_demo,
+            width="stretch",
+        )
+        tour[1].caption(
+            "The whole app in two minutes: the bid, the forecast, a live retrain, the bid "
+            "sheet and a week of forecast versus actual. Opens in a window; captions burned in."
         )
 
     for row in range(0, len(cards), 3):
@@ -1059,7 +1086,9 @@ def main() -> None:
         return
     render_sidebar(health)
     today = today_et()
-    if st.session_state.chat_open:
+    if st.session_state.demo_open and DEMO_VIDEO.exists():
+        demo_dialog()
+    elif st.session_state.chat_open:
         chat_dialog(today)
     flash = st.session_state.flash
     if flash:

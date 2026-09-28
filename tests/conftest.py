@@ -26,6 +26,7 @@ _isolated = tempfile.mkdtemp(prefix="gridcast_models_")
 os.environ.setdefault("TFT_BUNDLE_DIR", os.path.join(_isolated, "tft"))
 os.environ.setdefault("WEATHER_PATH", os.path.join(_isolated, "weather.csv"))
 os.environ.setdefault("WEATHER_HOURLY_PATH", os.path.join(_isolated, "weather_hourly.csv"))
+os.environ.setdefault("DEMO_VIDEO", os.path.join(_isolated, "demo.mp4"))  # absent: no tour button
 os.environ.setdefault("SCHEDULER_ENABLED", "0")
 os.environ.setdefault("WEATHER_REFRESH", "0")
 os.environ.setdefault("LLM_PROVIDER", "none")

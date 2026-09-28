@@ -374,12 +374,19 @@ def test_overview_plays_the_tour_only_when_the_file_exists(fake: FakeApi, tmp_pa
     import os
 
     at = run()
-    assert not any("Two-minute tour" in m.value for m in at.markdown)
+    assert not any(b.label == "Watch the 2-min demo" for b in at.button)
     clip = tmp_path / "demo.mp4"
-    clip.write_bytes(b"\x00\x00\x00\x18ftypmp42")  # any bytes: the app only checks presence
+    clip.write_bytes(b"ftypmp42")  # any bytes: the app only checks that the file exists
+    previous = os.environ.get("DEMO_VIDEO")
     os.environ["DEMO_VIDEO"] = str(clip)
     try:
         at = run()
-        assert any("Two-minute tour" in m.value for m in at.markdown)
+        assert not at.session_state["demo_open"]  # hidden until asked for
+        at.button(key="demo_btn").click().run()
+        assert not at.exception
+        assert at.session_state["demo_open"] is True
+        assert any("Captions are burned in" in c.value for c in at.caption)  # the window
+        at.button(key="chat_bubble_btn").click().run()  # the guide takes the window over
+        assert at.session_state["demo_open"] is False and at.session_state["chat_open"] is True
     finally:
-        del os.environ["DEMO_VIDEO"]
+        os.environ["DEMO_VIDEO"] = previous or ""
