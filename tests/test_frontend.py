@@ -368,3 +368,18 @@ def test_backend_down_is_a_message_not_a_crash() -> None:
         assert any("not reachable" in e.value for e in at.error)
     finally:
         api.set_client(api.Api())
+
+
+def test_overview_plays_the_tour_only_when_the_file_exists(fake: FakeApi, tmp_path: Path) -> None:
+    import os
+
+    at = run()
+    assert not any("Two-minute tour" in m.value for m in at.markdown)
+    clip = tmp_path / "demo.mp4"
+    clip.write_bytes(b"\x00\x00\x00\x18ftypmp42")  # any bytes: the app only checks presence
+    os.environ["DEMO_VIDEO"] = str(clip)
+    try:
+        at = run()
+        assert any("Two-minute tour" in m.value for m in at.markdown)
+    finally:
+        del os.environ["DEMO_VIDEO"]

@@ -21,6 +21,7 @@ buttons only ever touch the state and rerun.
 
 from __future__ import annotations
 
+import os
 import sys
 import uuid
 from datetime import date, datetime, timedelta
@@ -71,6 +72,10 @@ OPTIONS: list[tuple[str, dict[str, Any]]] = [
 OPTION_MAP = dict(OPTIONS)
 NAVIGATING = ("list_zones", "show_zone")
 MAX_BACKFILL_DAYS = 31
+# The two-minute tour plays on the Overview when the file exists. It lives under
+# frontend/media/ because that folder ships in the frontend image as it is (docs/ does
+# not); DEMO_VIDEO overrides the path. Without the file the section is simply absent.
+DEMO_VIDEO = Path(os.environ.get("DEMO_VIDEO") or Path(_ROOT) / "frontend" / "media" / "demo.mp4")
 WELCOME = (
     "👋 Hi, I'm the gridcast guide. Tell me where you want to go in plain English, for "
     "example *how accurate was the Long Island forecast last week* or *NYC prices "
@@ -419,6 +424,16 @@ def render_overview(health: dict[str, Any]) -> None:
     k[1].metric("NYISO pre-close, same days", fmt_pct(iso))
     k[2].metric("7-day imbalance cost", fmt_usd(usd))
     k[3].metric("Zones with alerts", sum(1 for c in cards if c["alert"]))
+
+    if DEMO_VIDEO.exists():
+        player, blurb = st.columns([1.5, 1], gap="large", vertical_alignment="center")
+        player.video(str(DEMO_VIDEO))
+        blurb.markdown(
+            "**Two-minute tour.** What a day-ahead bid is, how the forecast is made as of "
+            "the 05:00 ET cutoff, a live retrain landing next to the served model, a bid "
+            "sheet with its dollars at risk, and a week of forecast versus actual next to "
+            "NYISO's own forecast. Captions are burned in."
+        )
 
     for row in range(0, len(cards), 3):
         cols = st.columns(3)
