@@ -38,10 +38,15 @@ if [ -z "$budget" ]; then
 fi
 
 step "Artifact Registry $REGISTRY"
-if ! gcloud artifacts repositories describe "$REPO" --location="$REGION" "${G[@]}" >/dev/null 2>&1; then
+# a just-enabled API can answer PERMISSION_DENIED for a minute or two: retry
+for attempt in 1 2 3 4 5 6 7 8; do
+  gcloud artifacts repositories describe "$REPO" --location="$REGION" "${G[@]}" >/dev/null 2>&1 && break
   gcloud artifacts repositories create "$REPO" --repository-format=docker --location="$REGION" \
-    --immutable-tags --description="gridcast k8s trial images" "${G[@]}"
-fi
+    --immutable-tags --description="gridcast k8s trial images" "${G[@]}" && break
+  [ "$attempt" -lt 8 ] || die "could not create the repository"
+  echo "retrying in 30 s (the API may still be propagating)"
+  sleep 30
+done
 gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
 
 step "images, pinned by digest in overlays/gke"
