@@ -55,6 +55,7 @@ class FakeApi(api.Api):
         self.reads: list[tuple[str, str, str | None]] = []  # forecast reads (zone, day, version)
         self.stored = {"N.Y.C.": {TARGET.isoformat()}, "LONGIL": {TARGET.isoformat()}}
         self.extra: dict[tuple[str, str], list[str]] = {}  # retrains per (zone, day)
+        self.late_primary = False  # the served forecast was stored after the 05:00 ET close
 
     def request(self, method: str, path: str, timeout: float | None = None, **kwargs: Any) -> Any:
         raise AssertionError(f"unexpected raw request {method} {path}")
@@ -98,13 +99,14 @@ class FakeApi(api.Api):
         if version and version not in extras:
             raise api.ApiError(404, "no version")
         versions = [
-            {"forecast_id": 1, "model": "tft-onnx:e979ee4c9f6d:x", "model_version": "abc", "requested": "auto", "created_at": "2026-09-18 08:30:00", "alpha": 0.43, "primary": True, "coverage": 1.0, "mape_hour": 3.5, "band_coverage": 78.0, "imbalance_usd": 900.0, "imbalance_alpha_usd": 850.0, "isolf_mape_hour": 3.9, "isolf_imbalance_usd": 1100.0},
-            *({"forecast_id": 2 + k, "model": "lgbm:nyiso-fv1", "model_version": v, "requested": "lgbm", "created_at": "2026-09-20 03:05:00", "alpha": 0.43, "primary": False, "coverage": None, "mape_hour": None, "band_coverage": None, "imbalance_usd": None, "imbalance_alpha_usd": None, "isolf_mape_hour": None, "isolf_imbalance_usd": None} for k, v in enumerate(extras)),
+            {"forecast_id": 1, "model": "tft-onnx:e979ee4c9f6d:x", "model_version": "abc", "requested": "auto", "created_at": "2026-09-18 08:30:00", "late": self.late_primary, "alpha": 0.43, "primary": True, "coverage": 1.0, "mape_hour": 3.5, "band_coverage": 78.0, "imbalance_usd": 900.0, "imbalance_alpha_usd": 850.0, "isolf_mape_hour": 3.9, "isolf_imbalance_usd": 1100.0},
+            *({"forecast_id": 2 + k, "model": "lgbm:nyiso-fv1", "model_version": v, "requested": "lgbm", "created_at": "2026-09-20 03:05:00", "late": True, "alpha": 0.43, "primary": False, "coverage": None, "mape_hour": None, "band_coverage": None, "imbalance_usd": None, "imbalance_alpha_usd": None, "isolf_mape_hour": None, "isolf_imbalance_usd": None} for k, v in enumerate(extras)),
         ]  # fmt: skip
         base = 6000.0 if zone == "N.Y.C." else 2300.0
         return {
             "forecast_id": 1, "zone": zone, "target_date": t, "model": "tft-onnx:e979ee4c9f6d:x" if not version else "lgbm:nyiso-fv1",
             "model_version": version or "abc", "requested": "lgbm" if version else "auto", "primary": not version,
+            "late": True if version else self.late_primary,
             "cutoff_utc": "2026-09-18 09:00:00", "created_at": "2026-09-18 08:30:00",
             "alpha": 0.43, "band_scale_p10": 0.98, "band_scale_p90": 1.03, "history_start": "x", "history_end": "y", "weather": 1,
             "versions": versions,
@@ -255,6 +257,11 @@ def test_forecast_view_actions(fake: FakeApi) -> None:
     assert fake.reads[-1] == ("N.Y.C.", "2026-09-21", "def")  # the overlay was fetched
     assert any("Every version of this day" in m.value for m in at.markdown)
     assert any("primary of 2 versions" in m.value for m in at.markdown)
+    versions = next(d.value for d in at.dataframe if "Before the close" in d.value.columns)
+    assert list(versions["Before the close"]) == ["yes", "no"]  # the retrain came after the close
+    assert not any(
+        "made after the 05:00 ET close" in m.value for m in at.markdown
+    )  # primary on time
     pills.set_value([]).run()
     assert not at.exception
     assert fake.reads[-1] == ("N.Y.C.", "2026-09-21", None)  # deselected: primary only
@@ -390,3 +397,12 @@ def test_overview_plays_the_tour_only_when_the_file_exists(fake: FakeApi, tmp_pa
         assert at.session_state["demo_open"] is False and at.session_state["chat_open"] is True
     finally:
         os.environ["DEMO_VIDEO"] = previous or ""
+
+
+def test_a_late_forecast_is_flagged_in_forecast_and_schedule(fake: FakeApi) -> None:
+    fake.late_primary = True
+    at = run({"view": "forecast", "zone": "N.Y.C."})
+    assert any("made after the 05:00 ET close" in m.value for m in at.markdown)
+    assert any("a real bid could not have used it" in c.value for c in at.caption)
+    at = run({"view": "schedule", "zone": "N.Y.C."})
+    assert any("made after the 05:00 ET close" in c.value for c in at.caption)

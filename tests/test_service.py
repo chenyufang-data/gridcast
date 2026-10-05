@@ -164,6 +164,11 @@ def test_tree_forecast_is_stored_and_idempotent(client: TestClient) -> None:
         headers=TOKEN,
     ).json()
     assert again["model_version"] == fc["model_version"] and again["new"] is False
+    # made long after its 05:00 ET close: fair to score, but flagged as no real bid
+    assert fc["late"] is True
+    day = client.get(f"/zones/nyc/forecasts/{TARGET}").json()
+    assert day["late"] is True and all(v["late"] for v in day["versions"])
+    assert client.get("/zones/nyc/forecasts").json()[0]["late"] is True
 
     # auto without a bundle falls back to the trees and says why
     auto = client.post(
@@ -189,6 +194,19 @@ def test_tree_forecast_is_stored_and_idempotent(client: TestClient) -> None:
 
 
 @pytest.mark.slow
+@pytest.mark.slow
+def test_a_forecast_made_before_the_close_is_on_time(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    before_close = db.ts_text(cutoff_for(TARGET) - pd.Timedelta(minutes=30))
+    monkeypatch.setattr(service.db, "now_text", lambda: before_close)
+    fc = service.generate_forecast("GENESE", TARGET, "lgbm")
+    assert fc["created_at"] == before_close and fc["late"] is False
+    monkeypatch.undo()
+    day = client.get(f"/zones/genese/forecasts/{TARGET}").json()
+    assert day["late"] is False and [v["late"] for v in day["versions"]] == [False]
+
+
 def test_nyca_forecast_has_no_prices(client: TestClient) -> None:
     fc = client.post(
         "/zones/nyca/forecasts",

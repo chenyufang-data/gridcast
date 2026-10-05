@@ -531,11 +531,19 @@ def _version_role(v: dict[str, Any]) -> str:
     return f"manual ({v.get('requested') or 'unknown'})"
 
 
+LATE_BADGE = ":orange-badge[:material/schedule: made after the 05:00 ET close]"
+LATE_NOTE = (
+    "Made after the bid deadline (a backfill, a retrain or a late run). Its data stops at the "
+    "cutoff, so the score is fair, but a real bid could not have used it."
+)
+
+
 def _versions_table(versions: list[dict[str, Any]]) -> pd.DataFrame:
     rows = [
         {
             "Version": _version_label(v),
             "Role": _version_role(v),
+            "Before the close": "no" if v.get("late") else "yes",
             "Hourly MAPE %": v.get("mape_hour"),
             "NYISO MAPE %": v.get("isolf_mape_hour"),
             "Imbalance $": v.get("imbalance_usd"),
@@ -676,12 +684,15 @@ def render_forecast(zone: str, health: dict[str, Any]) -> None:
         charts.forecast_figure(df, overlays=overlays), width="stretch", config=charts.CONFIG
     )
     more = f" · primary of {len(versions)} versions" if len(versions) > 1 else ""
+    late = f" {LATE_BADGE}" if fc.get("late") else ""
     st.markdown(
-        f"{model_badge(fc['model'])} version `{fc['model_version']}`{more} · made "
+        f"{model_badge(fc['model'])}{late} version `{fc['model_version']}`{more} · made "
         f"{fc['created_at']} UTC as of the {fc['cutoff_utc'][:16]} UTC cutoff · "
         f"α = {fc['alpha']:.2f} · band scale ×{fc['band_scale_p10']:.2f} / "
         f"×{fc['band_scale_p90']:.2f} · peak {fmt_mw(df['predicted'].max())}"
     )
+    if fc.get("late"):
+        st.caption(LATE_NOTE)
     if fc.get("score"):
         _score_row(fc["score"])
     else:
@@ -766,6 +777,7 @@ def render_schedule(zone: str, health: dict[str, Any]) -> None:
         f"One MW bid per hour, settled at RT − DA. Trailing 30 days: α = {stats['alpha']:.2f} "
         f"(short costs {stats['c_under_usd_per_mwh'] or 0:.2f} \\$/MWh, long costs "
         f"{stats['c_over_usd_per_mwh'] or 0:.2f} \\$/MWh). Forecast {model_badge(fc['model'])}"
+        + (f" {LATE_BADGE}" if fc.get("late") else "")
     )
     hourly = _hourly_from_forecast(fc)
     sig = f"{zone}|{ss.target}|{fc['model_version']}"

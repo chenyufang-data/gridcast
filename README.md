@@ -161,6 +161,20 @@ cutoff (D−1 05:00 ET), and keeps everything in one SQLite file on the data vol
   per-IP rate limit. `GET /health` shows the data coverage, the served model and the
   last job runs; the full API is at `/docs`.
 
+**The bid deadline: this demo versus a real deployment.** Every forecast uses data up to
+its cutoff, 05:00 ET on the day before, so a forecast made later still scores fairly, but
+no real bid could have used it. That covers a backfill, a retrain of a past day, and the
+morning run after an outage. The demo marks such forecasts "made after the 05:00 ET close"
+in the Forecast and DAM Schedule views and returns `late: true` from the API. Here the
+forecasting and the UI share one VM, so an outage across 05:00 ET leaves that day without
+an on-time forecast, and the flag shows it rather than hiding it.
+
+A real deployment would run forecasting and bidding apart from the UI, on infrastructure
+of their own. A second, two-day-ahead model, using data up to D−2, would produce a backup
+bid of record every day. Whenever the D−1 run fails or misses the close, the backup would
+be submitted instead. That backup model is not built in this repo, and its accuracy would
+need its own backtest before any number is reported.
+
 ```powershell
 $env:ADMIN_TOKEN = "dev-token"
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload

@@ -623,6 +623,7 @@ def generate_forecast(zone: str, target: date | None = None, model: str = "auto"
         "requested": model,
         "primary": is_primary,
         "created_at": created_at,
+        "late": created_at > db.ts_text(cutoff),
         "new": is_new,
         "cutoff_utc": cutoff.isoformat(),
         "alpha": round(float(alpha), 4),
@@ -700,6 +701,13 @@ def primary_forecast(conn: sqlite3.Connection, zone: str, target: date) -> sqlit
     ).fetchone()
 
 
+# A forecast is *late* when it was stored after its bid deadline (D-1 05:00 ET, the cutoff
+# its data stops at). Its score is still fair, but a real bid could not have used it: a
+# backfill, a retrain of a past day, or the morning run after an outage across 05:00 ET.
+# Both columns are UTC text in one format, so the comparison is a string comparison.
+_LATE = "(f.created_at > f.cutoff_utc)"
+
+
 def list_forecasts(zone: str, limit: int = 400) -> list[dict[str, Any]]:
     """The primary version per target date (newest day first) with its score, if any."""
     zone = resolve_zone(zone)
@@ -708,7 +716,7 @@ def list_forecasts(zone: str, limit: int = 400) -> list[dict[str, Any]]:
         rows = conn.execute(
             f"""
             SELECT f.id AS forecast_id, f.target_date, f.model, f.model_version, f.requested,
-                   f.created_at, f.alpha, s.coverage, s.mape_hour, s.imbalance_usd,
+                   f.created_at, {_LATE} AS late, f.alpha, s.coverage, s.mape_hour, s.imbalance_usd,
                    s.isolf_mape_hour,
                    (SELECT COUNT(*) FROM forecasts f3 WHERE f3.zone = f.zone
                     AND f3.target_date = f.target_date) AS n_versions
@@ -718,7 +726,7 @@ def list_forecasts(zone: str, limit: int = 400) -> list[dict[str, Any]]:
             """,
             (zone, limit),
         ).fetchall()
-        return [dict(r) for r in rows]
+        return [dict(r, late=bool(r["late"])) for r in rows]
     finally:
         conn.close()
 
@@ -728,7 +736,8 @@ def forecast_versions(conn: sqlite3.Connection, zone: str, target: date) -> list
     rows = conn.execute(
         f"""
         SELECT f.id AS forecast_id, f.model, f.model_version, f.requested, f.created_at,
-               f.alpha, ({_PRIMARY}) AS is_primary, s.coverage, s.mape_hour, s.band_coverage,
+               {_LATE} AS late, f.alpha, ({_PRIMARY}) AS is_primary, s.coverage, s.mape_hour,
+               s.band_coverage,
                s.imbalance_usd, s.imbalance_alpha_usd, s.isolf_mape_hour, s.isolf_imbalance_usd
         FROM forecasts f LEFT JOIN forecast_scores s ON s.forecast_id = f.id
         WHERE f.zone = ? AND f.target_date = ? ORDER BY f.created_at, f.id
@@ -739,6 +748,7 @@ def forecast_versions(conn: sqlite3.Connection, zone: str, target: date) -> list
     for r in rows:
         d = dict(r)
         d["primary"] = bool(d.pop("is_primary"))
+        d["late"] = bool(d["late"])
         out.append(d)
     return out
 
@@ -814,6 +824,7 @@ def get_forecast(zone: str, target: date, version: str | None = None) -> dict[st
         out = dict(f)
         out["forecast_id"] = out.pop("id")
         out["primary"] = any(v["primary"] and v["forecast_id"] == f["id"] for v in versions)
+        out["late"] = f["created_at"] > f["cutoff_utc"]
         out["versions"] = versions
         out["score"] = dict(score) if score else None
         out["values"] = [
