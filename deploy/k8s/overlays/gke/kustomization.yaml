@@ -1,7 +1,6 @@
 # GKE Autopilot: the optional 72-hour trial in the separate project nyiso-gridcast-k8s.
-# Images come from Artifact Registry and are pinned by digest. The all-zero digests are
-# placeholders that deploy/k8s/gke/push.sh replaces (Phase 5); they cannot be pulled, so
-# nothing deploys by accident before then.
+# Images come from Artifact Registry and are pinned by digest; deploy/k8s/gke/push.sh
+# writes the digests below (first push 2026-10-05, images built from fd63a04).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -14,13 +13,13 @@ resources:
 images:
   - name: gridcast-api
     newName: us-east1-docker.pkg.dev/nyiso-gridcast-k8s/gridcast/api
-    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+    digest: sha256:4f7efcb3c5aa248bd12dfc76e3112b6a8e8ac9d284a9b427f4ae42fbc62b0941
   - name: gridcast-ui
     newName: us-east1-docker.pkg.dev/nyiso-gridcast-k8s/gridcast/ui
-    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+    digest: sha256:036d338093f3ab6af72329f58a60742e83c06eebdbc5c08477c3a70d35f165b6
   - name: gridcast-model
     newName: us-east1-docker.pkg.dev/nyiso-gridcast-k8s/gridcast/model
-    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+    digest: sha256:2025074c7e6595813648a5833f45f8a92cedd3d2b6b66d704485afa932abb3ad
 
 # The model pin and its digest above change together, in one commit, through push.sh.
 configMapGenerator:
