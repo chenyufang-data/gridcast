@@ -10,6 +10,9 @@ separate project.
 | `base/` | everything both environments share: the API and UI Deployments and Services, the data volume, ServiceAccounts, the NetworkPolicy, and the ConfigMap generated from `params.env` |
 | `overlays/kind/` | locally built `:ci` images, no weather refresh, keyword chat; `kind-config.yaml` pins the node image (Kubernetes v1.36.4) |
 | `overlays/gke/` | Artifact Registry images pinned by digest, a single-pod volume (`ReadWriteOncePod`), two UI replicas with session affinity, Vertex AI chat |
+| `components/seed/`, `overlays/{kind,gke}-seed/` | the one-off seed: an environment with the API at zero replicas, the CronJobs suspended and a seed Job on the data volume |
+| `seed.sh` | runs the seed on either environment and restores it afterwards |
+| `gke/` | `up.sh`, `push.sh`, `teardown.sh` for the GKE trial (settings in `env.sh`) |
 
 The daily jobs run as four CronJobs (`base/cronjobs.yaml`) in New York time, with
 `concurrencyPolicy: Forbid`, a catch-up deadline and retries. Each run starts a small
@@ -76,3 +79,61 @@ by running the ingest job once. Remove everything with `kind delete cluster --na
 `tests/test_k8s_manifests.py` checks the invariants above on every test run: one API
 replica, Recreate, no other pod on the volume, the scheduler off, requests and memory
 limits on every container, no secrets.
+
+## Seed the store
+
+A new volume is empty. `deploy/seed.py` fills it (the archive, weather, 30 days of
+forecasts and their scores), and it writes the database, so it runs only while the API is
+stopped:
+
+```bash
+deploy/k8s/seed.sh kind     # or gke
+```
+
+The script scales the API to zero and waits for its pod to go, then applies
+`overlays/<env>-seed`. That overlay is the environment plus `components/seed`: the API
+stays at zero, every CronJob is suspended, and the Job `gridcast-seed` runs on the volume
+with the API's own image, model and settings (copied from the rendered Deployment, so
+`push.sh` keeps editing one file). When the Job ends, the script re-applies the plain
+overlay; `kubectl apply` drops the fields the seed set, so the API returns and the
+schedules resume. On GKE the volume is `ReadWriteOncePod`, so a seed pod started next to a
+running API would stay `Pending`. The test suite checks that a seed overlay differs from
+its environment in exactly those fields.
+
+Measured on kind against the real archive (15 months, 30 forecast days, the real TFT):
+149 s and a cgroup memory peak of 425 MiB, so the Job gets 1 GiB. The last line of the
+Job's log prints the peak again on every run.
+
+## The GKE trial
+
+A time-boxed trial on GKE Autopilot in its own project (`nyiso-gridcast-k8s`), so it
+cannot touch the production VM. Access is `kubectl port-forward` only: no public IP, no
+DNS. Expected cost about $2.30 for 72 hours. Run from the laptop in Git Bash, with Docker
+Desktop running and `gcloud components install gke-gcloud-auth-plugin` done once.
+
+```bash
+BILLING=XXXXXX-XXXXXX-XXXXXX deploy/k8s/gke/up.sh    # gcloud billing accounts list
+deploy/k8s/seed.sh gke
+kubectl --context gke_nyiso-gridcast-k8s_us-east1_gridcast -n gridcast port-forward svc/gridcast-ui 8501:8501
+deploy/k8s/gke/teardown.sh                            # within 72 hours
+```
+
+`up.sh` creates the project and links billing, enables the APIs, creates a $15 budget with
+alerts at 50, 90 and 100 % (credits excluded, so the alerts track list cost) before
+anything bills, creates an Artifact Registry repository with immutable tags, runs
+`push.sh`, creates the Autopilot cluster, grants Vertex AI to the UI's Kubernetes service
+account through Workload Identity (no Google service account, no key), creates the
+namespace and the admin Secret, and applies the overlay. Each step skips what already
+exists, so a failed run can be re-run. No script changes the gcloud default project, and
+every `kubectl` call names the trial cluster's context.
+
+`push.sh` loads the model bundle with the serving code first, then builds and pushes the
+images and writes their digests into `overlays/gke`, together with the model's
+`TFT_EXPECTED_VERSION`. The API and UI images are built only from committed code, tagged
+with the commit. The monthly model refresh is `push.sh model`, then `kubectl apply -k`.
+
+`teardown.sh` saves the evidence (jobs, rollout history, events, logs) under `k8s-trial/`
+(gitignored), deletes any LoadBalancer Service and the namespace (the volume's disk goes
+with its claim), then the cluster, deletes orphaned `pvc-*` disks, lists forwarding rules
+and addresses (all must be zero), and deletes the registry. `--delete-project` also
+removes the budget and the project.

@@ -1,0 +1,107 @@
+# One-off seed: deploy/seed.py back-fills the store (archive, weather, trailing forecasts,
+# scores). It writes the SQLite store, so it runs only while the API is scaled to zero; this
+# component does that (see kustomization.yaml). On GKE the volume is ReadWriteOncePod, so a
+# seed pod started next to a running API stays Pending: the platform enforces the rule.
+# The image, the model init container and the settings are the API's own (replacements and
+# the shared ConfigMaps), so the seed forecasts with exactly the model the API will serve.
+# The final line of the log is the container's cgroup memory peak, to keep sizing measured.
+# Measured on kind against the real archive (2026-10-05, 15 months + 30 forecast days, real
+# TFT): 149 s, memory.peak 425 MiB including page cache -> 1 GiB, request = limit.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: gridcast-seed
+  labels:
+    app.kubernetes.io/name: gridcast
+    app.kubernetes.io/component: seed
+spec:
+  backoffLimit: 1  # every step upserts, so one retry is safe; more would hide a real failure
+  activeDeadlineSeconds: 7200
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: gridcast
+        app.kubernetes.io/component: seed
+    spec:
+      serviceAccountName: gridcast-api
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: model
+          image: gridcast-model  # replaced by the API's init image
+          command:
+            - sh
+            - -c
+            - mkdir -p /models/tft && cp /model/tft.onnx /model/tft.json /models/tft/ && sha256sum /models/tft/tft.onnx
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: models
+              mountPath: /models
+      containers:
+        - name: seed
+          image: gridcast-api  # replaced by the API's image
+          command:
+            - sh
+            - -c
+            - >-
+              python deploy/seed.py "$@"; rc=$?;
+              echo "memory.peak $(cat /sys/fs/cgroup/memory.peak 2>/dev/null || echo unknown) bytes";
+              exit $rc
+            - seed
+          args: ["--months", "1", "--forecast-days", "1"]  # each seed overlay sets its own
+          envFrom:
+            - configMapRef:
+                name: gridcast-config
+            - configMapRef:
+                name: gridcast-model
+          env:
+            - name: HOME
+              value: /tmp
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: models
+              mountPath: /models
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: gridcast-data
+        - name: models
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
