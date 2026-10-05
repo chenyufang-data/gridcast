@@ -47,6 +47,6 @@ pretty = true
 module = [
     "pandas.*", "lightgbm.*", "sklearn.*", "streamlit.*", "plotly.*",
     "holidays.*", "matplotlib.*", "requests.*", "dotenv.*", "xgboost.*", "torch.*",
-    "onnxruntime.*", "google.*",
+    "onnxruntime.*", "google.*", "yaml.*",
 ]
 ignore_missing_imports = true

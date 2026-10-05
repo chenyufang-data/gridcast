@@ -1,0 +1,21 @@
+# kind: the laptop and CI. Images are built locally, tagged :ci and loaded with
+# `kind load docker-image` (tags other than :latest default to IfNotPresent, so nothing is
+# pulled). No weather refresh and keyword chat: the cluster needs no Google credentials.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+images:
+  - name: gridcast-api
+    newTag: ci
+  - name: gridcast-ui
+    newTag: ci
+
+configMapGenerator:
+  - name: gridcast-config
+    behavior: merge
+    literals:
+      - WEATHER_REFRESH=0
+      - LLM_PROVIDER=none

@@ -1,0 +1,17 @@
+# The UI's stable name. ClusterIP: reached with `kubectl port-forward svc/gridcast-ui 8501`.
+apiVersion: v1
+kind: Service
+metadata:
+  name: gridcast-ui
+  labels:
+    app.kubernetes.io/name: gridcast
+    app.kubernetes.io/component: ui
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: gridcast
+    app.kubernetes.io/component: ui
+  ports:
+    - name: http
+      port: 8501
+      targetPort: http

@@ -1,0 +1,30 @@
+# gridcast on Kubernetes: the parts every environment shares.
+# Overlays (overlays/kind, overlays/gke) set image references, sizes and environment
+# settings. Design and reasons: docs/k8s-plan.md (local), walkthrough: docs/k8s_manual.md.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: gridcast
+
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: gridcast
+    includeSelectors: false
+
+resources:
+  - namespace.yaml
+  - serviceaccounts.yaml
+  - api-pvc.yaml
+  - api-deployment.yaml
+  - api-service.yaml
+  - ui-deployment.yaml
+  - ui-service.yaml
+  - networkpolicy.yaml
+
+# Non-secret settings. The generated name carries a content hash, so any change rolls the
+# pods, and old names stay behind for `kubectl rollout undo`. ADMIN_TOKEN is not here: it
+# lives in the Secret gridcast-admin, created out of band and never committed.
+configMapGenerator:
+  - name: gridcast-config
+    envs:
+      - params.env

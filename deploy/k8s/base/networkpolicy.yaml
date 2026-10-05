@@ -1,0 +1,27 @@
+# Only the UI and the job triggers may call the API. Kubelet probes and `kubectl
+# port-forward` are not pod-to-pod traffic and keep working. Enforced where the network
+# plugin implements NetworkPolicy (GKE Dataplane V2 does).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: gridcast-api-ingress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: gridcast
+      app.kubernetes.io/component: api
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: gridcast
+              app.kubernetes.io/component: ui
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: gridcast
+              app.kubernetes.io/component: cron
+      ports:
+        - port: 8000
+          protocol: TCP
