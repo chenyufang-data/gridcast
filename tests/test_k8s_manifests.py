@@ -231,3 +231,15 @@ def test_the_kind_pin_is_the_committed_fixture_bundle() -> None:
 
     bundle = OnnxTFT.load(K8S / "fixtures" / "tft-tiny")  # raises if FEATURE_VERSION moved on
     assert _model_config(render("kind"))["TFT_EXPECTED_VERSION"] == bundle.version
+
+
+@pytest.mark.parametrize("overlay", OVERLAYS)
+def test_every_object_lives_in_the_gridcast_namespace(overlay: str) -> None:
+    # objects an overlay adds don't inherit the base's namespace: this caught the archive
+    # fixture landing in `default`, where the API could not resolve it
+    outside = [
+        (d["kind"], d["metadata"]["name"])
+        for d in render(overlay)
+        if d["kind"] != "Namespace" and d["metadata"].get("namespace") != "gridcast"
+    ]
+    assert outside == []

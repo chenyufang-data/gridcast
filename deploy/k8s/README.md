@@ -47,34 +47,31 @@ The decisions that shape it:
 ## Run it on kind
 
 PowerShell from the repo root, with Docker Desktop running and `kind` installed
-(`winget install Kubernetes.kind`).
+(`winget install Kubernetes.kind`). This is the same sequence CI runs
+(`.github/workflows/k8s.yml`), about a minute once the images exist.
 
 ```powershell
 kind create cluster --config deploy/k8s/overlays/kind/kind-config.yaml
 docker build -t gridcast-api:ci .
 docker build -f Dockerfile.frontend -t gridcast-ui:ci .
+docker build -f deploy/k8s/fixtures/archive.Dockerfile -t gridcast-archive-fixture:ci .
 docker build -f deploy/k8s/model/Dockerfile -t gridcast-model:fixture deploy/k8s/fixtures/tft-tiny
-kind load docker-image --name gridcast gridcast-api:ci gridcast-ui:ci gridcast-model:fixture
+kind load docker-image --name gridcast gridcast-api:ci gridcast-ui:ci gridcast-archive-fixture:ci gridcast-model:fixture
 
 kubectl apply -f deploy/k8s/base/namespace.yaml
 $token = .\.venv\Scripts\python.exe -c "import secrets; print(secrets.token_urlsafe(32))"
 kubectl -n gridcast create secret generic gridcast-admin --from-literal=ADMIN_TOKEN=$token
 kubectl apply -k deploy/k8s/overlays/kind
 kubectl -n gridcast rollout status deploy/gridcast-api
-kubectl -n gridcast rollout status deploy/gridcast-ui
 
+.\.venv\Scripts\python.exe deploy/k8s/ci/smoke.py            # the CI checks, against this cluster
 kubectl -n gridcast port-forward svc/gridcast-ui 8501:8501     # http://localhost:8501
-kubectl -n gridcast port-forward svc/gridcast-api 8000:8000    # http://localhost:8000/docs
 ```
 
-The store starts empty. To fill it, ingest a range through the API (the token goes in
-the `X-Admin-Token` header):
-
-```powershell
-curl.exe -X POST -H "X-Admin-Token: $token" "http://localhost:8000/admin/ingest?start=2026-09-14&end=2026-10-04"
-```
-
-Remove everything with `kind delete cluster --name gridcast`.
+On kind the API reads a synthetic NYISO archive served inside the cluster
+(`fixtures/make_archive.py`, through `NYISO_ARCHIVE_BASE`), written at pod start for the
+last two to three months, so nothing leaves the cluster. The smoke test fills the store
+by running the ingest job once. Remove everything with `kind delete cluster --name gridcast`.
 
 `tests/test_k8s_manifests.py` checks the invariants above on every test run: one API
 replica, Recreate, no other pod on the volume, the scheduler off, requests and memory
