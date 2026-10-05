@@ -84,3 +84,4 @@ docs/*.mov
 docs/*.wav
 docs/*.srt
 docs/k8s_manual.md
+docs/k8s-plan.md

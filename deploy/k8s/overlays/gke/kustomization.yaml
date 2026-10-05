@@ -1,0 +1,90 @@
+# GKE Autopilot: the optional 72-hour trial in the separate project nyiso-gridcast-k8s.
+# Images come from Artifact Registry and are pinned by digest. The all-zero digests are
+# placeholders that deploy/k8s/gke/push.sh replaces (Phase 5); they cannot be pulled, so
+# nothing deploys by accident before then.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: gridcast
+
+resources:
+  - ../../base
+  - pdb-ui.yaml
+
+images:
+  - name: gridcast-api
+    newName: us-east1-docker.pkg.dev/nyiso-gridcast-k8s/gridcast/api
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+  - name: gridcast-ui
+    newName: us-east1-docker.pkg.dev/nyiso-gridcast-k8s/gridcast/ui
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+  - name: gridcast-model
+    newName: us-east1-docker.pkg.dev/nyiso-gridcast-k8s/gridcast/model
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+
+# The model pin and its digest above change together, in one commit, through push.sh.
+configMapGenerator:
+  - name: gridcast-config
+    behavior: merge
+    literals:
+      - LLM_PROVIDER=vertex
+      - VERTEX_PROJECT=nyiso-gridcast-k8s
+      - VERTEX_LOCATION=us-central1
+      - VERTEX_MODEL=gemini-2.5-flash-lite
+  - name: gridcast-model
+    behavior: merge
+    literals:
+      - REQUIRE_TFT=1
+      - TFT_EXPECTED_VERSION=tft-onnx:e979ee4c9f6d:2026-09-19T09:00:00+00:00
+
+patches:
+  - target:
+      kind: Deployment
+      name: gridcast-api
+    patch: |-
+      - op: add
+        path: /metadata/annotations
+        value:
+          kubernetes.io/change-cause: "model tft-onnx:e979ee4c9f6d:2026-09-19T09:00:00+00:00"
+  # one pod per volume, enforced by the CSI driver; 10 GiB is the balanced PD minimum
+  - target:
+      kind: PersistentVolumeClaim
+      name: gridcast-data
+    patch: |-
+      - op: replace
+        path: /spec/accessModes
+        value: [ReadWriteOncePod]
+      - op: add
+        path: /spec/storageClassName
+        value: standard-rwo
+      - op: replace
+        path: /spec/resources/requests/storage
+        value: 10Gi
+  # Autopilot bills requests; a limit above the request lets a tree fit burst to two
+  # cores on clusters that support bursting (otherwise Autopilot sets limit = request)
+  - target:
+      kind: Deployment
+      name: gridcast-api
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/resources/limits/cpu
+        value: "2"
+  # two UI pods for availability; ClientIP affinity keeps a visitor on one pod, so its
+  # Streamlit session and its chat allowance stay put
+  - target:
+      kind: Deployment
+      name: gridcast-ui
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 2
+      - op: add
+        path: /spec/template/spec/containers/0/resources/limits/cpu
+        value: "1"
+  - target:
+      kind: Service
+      name: gridcast-ui
+    patch: |-
+      - op: add
+        path: /spec/sessionAffinity
+        value: ClientIP

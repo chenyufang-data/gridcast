@@ -31,6 +31,11 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 BUNDLE_DIR = Path(os.environ.get("TFT_BUNDLE_DIR") or PROJECT_ROOT / "data" / "models" / "tft")
 MAX_AGE_DAYS = int(os.environ.get("TFT_MAX_AGE_DAYS") or 60)
 MODEL_THREADS = int(os.environ.get("MODEL_THREADS") or 2)
+# Kubernetes pins the served model explicitly: the pod is ready only when the loaded bundle
+# is exactly TFT_EXPECTED_VERSION (with REQUIRE_TFT=1), and a bundle with another identity
+# is rejected rather than served. Both unset (the VM): any valid bundle serves, as before.
+REQUIRE_TFT = (os.environ.get("REQUIRE_TFT") or "0") not in ("0", "false", "no", "")
+EXPECTED_VERSION = (os.environ.get("TFT_EXPECTED_VERSION") or "").strip() or None
 
 # the trees: the backtest defaults (src.backtest.BacktestConfig), the same everywhere
 TREE_WINDOW_DAYS = 365
@@ -58,6 +63,8 @@ class ModelRegistry:
     def __init__(self, bundle_dir: Path | None = None, max_age_days: int | None = None) -> None:
         self.bundle_dir = Path(bundle_dir) if bundle_dir is not None else BUNDLE_DIR
         self.max_age_days = max_age_days if max_age_days is not None else MAX_AGE_DAYS
+        self.require_tft = REQUIRE_TFT
+        self.expected_version = EXPECTED_VERSION
         self.tft: OnnxTFT | None = None
         self.error: str | None = None
         self._signature: str | None = None
@@ -75,7 +82,12 @@ class ModelRegistry:
             if sig == self._signature and not force:
                 return self._describe()
             try:
-                self.tft = OnnxTFT.load(self.bundle_dir)
+                tft = OnnxTFT.load(self.bundle_dir)
+                if self.expected_version and tft.version != self.expected_version:
+                    raise ValueError(
+                        f"bundle {tft.version} is not the pinned {self.expected_version}"
+                    )
+                self.tft = tft
                 self.error = None
             except Exception as exc:
                 self.tft = None
@@ -114,12 +126,26 @@ class ModelRegistry:
         self.reload()
         return self._describe(target)
 
+    def ready(self) -> tuple[bool, str | None]:
+        """Readiness of the model side: with REQUIRE_TFT the pinned TFT must be loaded.
+
+        Age is deliberately not checked: a stale bundle hands over to the trees, which is
+        the designed fallback, not a reason to take the API out of service.
+        """
+        self.reload()
+        if self.require_tft and self.tft is None:
+            return False, f"TFT required but not served: {self.error or 'bundle missing'}"
+        return True, None
+
     def _describe(self, target: date | None = None) -> dict[str, Any]:
         tft: dict[str, Any] = {
             "bundle_dir": str(self.bundle_dir),
             "loaded": self.tft is not None,
             "error": self.error,
         }
+        if self.expected_version or self.require_tft:
+            tft["pinned_version"] = self.expected_version
+            tft["required"] = self.require_tft
         if self.tft is not None:
             fit = self.fit_cutoff()
             tft.update(

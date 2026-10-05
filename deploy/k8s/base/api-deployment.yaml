@@ -1,0 +1,133 @@
+# The FastAPI backend: the only writer of the SQLite store.
+# - replicas 1 and strategy Recreate: a rolling update would start the new pod while the old
+#   one still holds the volume (a second writer, or a pod stuck Pending on ReadWriteOncePod).
+# - resources from measurements (docs/k8s-plan.md section 2): 365 MiB steady, 439 MiB peak
+#   over six days, +94 MiB for one tree fit (fits are serialized) -> 1 GiB, request = limit.
+#   No CPU limit: a fit wants two cores for ~8 s, and throttling would starve the probes.
+# - probes: liveness never touches dependencies; readiness checks the store (read-only)
+#   and, when REQUIRE_TFT=1, the pinned model.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gridcast-api
+  labels:
+    app.kubernetes.io/name: gridcast
+    app.kubernetes.io/component: api
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  revisionHistoryLimit: 5
+  progressDeadlineSeconds: 600
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gridcast
+      app.kubernetes.io/component: api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: gridcast
+        app.kubernetes.io/component: api
+    spec:
+      serviceAccountName: gridcast-api
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        # copies the digest-pinned model image's bundle into the pod; nothing model-related
+        # lives on the data volume, so a rollback of the template is a rollback of the model
+        - name: model
+          image: gridcast-model
+          command:
+            - sh
+            - -c
+            - mkdir -p /models/tft && cp /model/tft.onnx /model/tft.json /models/tft/ && sha256sum /models/tft/tft.onnx
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: models
+              mountPath: /models
+      containers:
+        - name: api
+          image: gridcast-api
+          ports:
+            - name: http
+              containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: gridcast-config
+            - configMapRef:
+                name: gridcast-model
+          env:
+            - name: ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: gridcast-admin
+                  key: ADMIN_TOKEN
+            - name: HOME
+              value: /tmp
+          resources:
+            requests:
+              cpu: 250m
+              memory: 1Gi
+            limits:
+              memory: 1Gi
+          startupProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 2
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: models
+              mountPath: /models
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: gridcast-data
+        - name: models
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}

@@ -1,0 +1,77 @@
+# kind only: a synthetic NYISO archive served at http://gridcast-archive-fixture:8080 (the
+# API's NYISO_ARCHIVE_BASE on kind). Written at pod start in ~2 s, ~110 MiB peak.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gridcast-archive-fixture
+  labels:
+    app.kubernetes.io/name: gridcast
+    app.kubernetes.io/component: archive-fixture
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gridcast
+      app.kubernetes.io/component: archive-fixture
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: gridcast
+        app.kubernetes.io/component: archive-fixture
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: archive
+          image: gridcast-archive-fixture
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: ARCHIVE_ROOT
+              value: /archive
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 256Mi
+          readinessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 2
+            failureThreshold: 60
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: archive
+              mountPath: /archive
+      volumes:
+        - name: archive
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gridcast-archive-fixture
+  labels:
+    app.kubernetes.io/name: gridcast
+    app.kubernetes.io/component: archive-fixture
+spec:
+  selector:
+    app.kubernetes.io/name: gridcast
+    app.kubernetes.io/component: archive-fixture
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

@@ -7,6 +7,7 @@ files of 2026-09-15.
 
 from __future__ import annotations
 
+import os
 from datetime import date, time
 from zoneinfo import ZoneInfo
 
@@ -39,7 +40,9 @@ ISOLF_COLUMNS: dict[str, str] = {
 DEMO_DEFAULT_ZONE = "N.Y.C."
 
 # --- data source (public MIS archive; fetched at runtime, never committed) ---------
-NYISO_ARCHIVE_BASE = "http://mis.nyiso.com/public/csv"
+# NYISO_ARCHIVE_BASE overrides the host only for tests that serve a synthetic archive
+# (the Kubernetes CI fixture); the default is the public archive.
+NYISO_ARCHIVE_BASE = os.environ.get("NYISO_ARCHIVE_BASE") or "http://mis.nyiso.com/public/csv"
 NYISO_LEGAL_NOTICE_URL = "https://www.nyiso.com/legal-notice"
 FILE_TYPES: tuple[str, ...] = ("pal", "damlbmp_zone", "realtime_zone", "rtlbmp_zone", "isolf")
 ARCHIVE_DIRS: dict[str, str] = {

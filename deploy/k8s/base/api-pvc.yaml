@@ -1,0 +1,14 @@
+# SQLite, the NYISO fetch cache and the weather files. SQLite allows one writer and needs
+# local file locks, so exactly one pod may mount this volume. The GKE overlay tightens the
+# access mode to ReadWriteOncePod (CSI only); kind's local-path provisioner is not CSI, so
+# the base uses ReadWriteOnce and relies on the single-replica Recreate Deployment.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: gridcast-data
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi

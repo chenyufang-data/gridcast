@@ -117,21 +117,40 @@ def is_due(job: Job, now_utc: datetime, last_run: str | None) -> bool:
     return last < due_at
 
 
+class JobBusy(RuntimeError):
+    """The job is already running in this process (single flight)."""
+
+
+# One lock per job: a second request for a running job is refused instead of queued, so the
+# in-process thread, the admin endpoint and Kubernetes CronJobs (whose `kubectl create job
+# --from=cronjob/...` runs bypass concurrencyPolicy) can never run the same job twice at once.
+_RUNNING: dict[str, threading.Lock] = {j.name: threading.Lock() for j in JOBS}
+
+
 def run_job(name: str) -> dict[str, Any]:
-    """Run one job now (scheduler tick or the admin endpoint); records the outcome."""
+    """Run one job now (scheduler tick or the admin endpoint); records the outcome.
+
+    Raises :class:`JobBusy` when the same job is already running.
+    """
     job = JOB_BY_NAME[name]
-    t0 = time.perf_counter()
-    log.info("job %s: start", name)
+    lock = _RUNNING.setdefault(name, threading.Lock())
+    if not lock.acquire(blocking=False):
+        raise JobBusy(f"job {name} is already running")
     try:
-        detail = job.run()
-    except Exception as exc:
-        log.exception("job %s failed", name)
-        service.record_job(name, "error", {"error": str(exc)})
-        return {"name": name, "status": "error", "error": str(exc)}
-    elapsed = round(time.perf_counter() - t0, 1)
-    service.record_job(name, "ok", {"seconds": elapsed, "result": detail})
-    log.info("job %s: done in %.1fs", name, elapsed)
-    return {"name": name, "status": "ok", "seconds": elapsed, "result": detail}
+        t0 = time.perf_counter()
+        log.info("job %s: start", name)
+        try:
+            detail = job.run()
+        except Exception as exc:
+            log.exception("job %s failed", name)
+            service.record_job(name, "error", {"error": str(exc)})
+            return {"name": name, "status": "error", "error": str(exc)}
+        elapsed = round(time.perf_counter() - t0, 1)
+        service.record_job(name, "ok", {"seconds": elapsed, "result": detail})
+        log.info("job %s: done in %.1fs", name, elapsed)
+        return {"name": name, "status": "ok", "seconds": elapsed, "result": detail}
+    finally:
+        lock.release()
 
 
 def _last_runs() -> dict[str, str | None]:
@@ -167,7 +186,10 @@ class Scheduler:
         while not self._stop.is_set():
             try:
                 for name in due_jobs():
-                    run_job(name)
+                    try:
+                        run_job(name)
+                    except JobBusy:
+                        log.info("job %s already running; tick skipped", name)
             except Exception:
                 log.exception("scheduler tick failed")
             self._stop.wait(self.tick)

@@ -1,0 +1,6 @@
+*
+!src/__init__.py
+!src/config.py
+!tests/__init__.py
+!tests/synthetic.py
+!deploy/k8s/fixtures/make_archive.py

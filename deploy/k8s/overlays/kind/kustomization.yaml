@@ -1,0 +1,61 @@
+# kind: the laptop and CI. Images are built locally, tagged :ci and loaded with
+# `kind load docker-image` (tags other than :latest default to IfNotPresent, so nothing is
+# pulled). No weather refresh and keyword chat: the cluster needs no Google credentials.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: gridcast
+
+resources:
+  - ../../base
+  - archive-fixture.yaml
+
+images:
+  - name: gridcast-api
+    newTag: ci
+  - name: gridcast-ui
+    newTag: ci
+  # the CronJob trigger needs only Python's standard library: reuse the API image, which is
+  # already loaded, instead of pulling python:3.11-slim from Docker Hub (rate limits in CI;
+  # `kind load` also fails on multi-platform images)
+  - name: python
+    newName: gridcast-api
+    newTag: ci
+  # the tiny synthetic-data bundle (fixtures/tft-tiny), built into gridcast-model:fixture
+  - name: gridcast-model
+    newTag: fixture
+  - name: gridcast-archive-fixture
+    newTag: ci
+
+# The model pin: the API is ready only when the loaded bundle is exactly this identity.
+# The fixture is old (fit 2025-09-09), so the age limit is lifted on kind.
+configMapGenerator:
+  - name: gridcast-config
+    behavior: merge
+    literals:
+      - WEATHER_REFRESH=0
+      - LLM_PROVIDER=none
+      - NYISO_ARCHIVE_BASE=http://gridcast-archive-fixture:8080
+  - name: gridcast-model
+    behavior: merge
+    literals:
+      - REQUIRE_TFT=1
+      - TFT_EXPECTED_VERSION=tft-onnx:4fcfd208b746:2025-09-09T09:00:00+00:00
+      - TFT_MAX_AGE_DAYS=100000
+
+patches:
+  - target:
+      kind: Deployment
+      name: gridcast-api
+    patch: |-
+      - op: add
+        path: /metadata/annotations
+        value:
+          kubernetes.io/change-cause: "model tft-onnx:4fcfd208b746:2025-09-09T09:00:00+00:00 (synthetic fixture)"
+  # schedules never fire on kind; `kubectl create job --from=cronjob/...` still works
+  - target:
+      kind: CronJob
+    patch: |-
+      - op: add
+        path: /spec/suspend
+        value: true

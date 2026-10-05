@@ -1,0 +1,129 @@
+# Kubernetes on kind: deploy the stack on a throwaway cluster and smoke-test it.
+# Runs on every push that touches the app, the models, the manifests or the images (one run
+# per push, shown on the pull request too), and by hand. No external network in the test
+# path: the NYISO archive is synthetic and served inside the cluster, the model is a tiny
+# synthetic-data fixture, the chat runs in keyword mode. Design: deploy/k8s/README.md.
+name: k8s
+
+on:
+  push:
+    paths:
+      - "app/**"
+      - "frontend/**"
+      - "models/**"
+      - "src/**"
+      - "deploy/k8s/**"
+      - "Dockerfile"
+      - "Dockerfile.frontend"
+      - ".dockerignore"
+      - "requirements*.lock"
+      - ".github/workflows/k8s.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: k8s-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  KIND_VERSION: v0.33.0
+  KUBECTL_VERSION: v1.36.4
+  KUBECONFORM_VERSION: v0.8.0
+  # keep the run's artifacts to the diagnostics bundle (no per-build records)
+  DOCKER_BUILD_RECORD_UPLOAD: "false"
+
+jobs:
+  kind:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate the rendered manifests
+        run: |
+          curl -fsSL "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" | tar xz kubeconform
+          for overlay in kind gke; do
+            echo "== $overlay"
+            kubectl kustomize "deploy/k8s/overlays/$overlay" | ./kubeconform -strict -summary -
+          done
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build the API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          tags: gridcast-api:ci
+          load: true
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,scope=api,mode=max
+
+      - name: Build the UI image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.frontend
+          tags: gridcast-ui:ci
+          load: true
+          cache-from: type=gha,scope=ui
+          cache-to: type=gha,scope=ui,mode=max
+
+      - name: Build the synthetic archive image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/k8s/fixtures/archive.Dockerfile
+          tags: gridcast-archive-fixture:ci
+          load: true
+          cache-from: type=gha,scope=archive
+          cache-to: type=gha,scope=archive,mode=max
+
+      - name: Build the fixture model image
+        uses: docker/build-push-action@v6
+        with:
+          context: deploy/k8s/fixtures/tft-tiny
+          file: deploy/k8s/model/Dockerfile
+          tags: gridcast-model:fixture
+          load: true
+
+      - name: Create the kind cluster
+        uses: helm/kind-action@v1
+        with:
+          version: ${{ env.KIND_VERSION }}
+          kubectl_version: ${{ env.KUBECTL_VERSION }}
+          config: deploy/k8s/overlays/kind/kind-config.yaml
+          cluster_name: gridcast
+
+      - name: Load the images
+        run: kind load docker-image --name gridcast gridcast-api:ci gridcast-ui:ci gridcast-archive-fixture:ci gridcast-model:fixture
+
+      - name: Deploy
+        run: |
+          kubectl apply -f deploy/k8s/base/namespace.yaml
+          kubectl -n gridcast create secret generic gridcast-admin --from-literal=ADMIN_TOKEN="$(openssl rand -hex 24)"
+          kubectl apply -k deploy/k8s/overlays/kind
+          for d in gridcast-archive-fixture gridcast-api gridcast-ui; do
+            kubectl -n gridcast rollout status "deploy/$d" --timeout=180s
+          done
+
+      - name: Smoke test
+        run: python3 deploy/k8s/ci/smoke.py
+
+      - name: Collect diagnostics
+        if: failure()
+        run: |
+          mkdir -p k8s-debug
+          kubectl get all,pvc,cronjobs,jobs,configmaps -n gridcast -o wide > k8s-debug/get.txt 2>&1 || true
+          kubectl get events -n gridcast --sort-by=.lastTimestamp > k8s-debug/events.txt 2>&1 || true
+          kubectl describe pods -n gridcast > k8s-debug/describe-pods.txt 2>&1 || true
+          for pod in $(kubectl get pods -n gridcast -o name); do
+            name=$(basename "$pod")
+            kubectl logs -n gridcast "$pod" --all-containers --prefix > "k8s-debug/$name.log" 2>&1 || true
+            kubectl logs -n gridcast "$pod" --all-containers --previous > "k8s-debug/$name.previous.log" 2>&1 || true
+          done
+
+      - name: Upload diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: k8s-debug
+          path: k8s-debug

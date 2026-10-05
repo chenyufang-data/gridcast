@@ -1,0 +1,18 @@
+# The stable name the UI and the job triggers call: http://gridcast-api:8000.
+# ClusterIP only: the backend is never exposed outside the cluster.
+apiVersion: v1
+kind: Service
+metadata:
+  name: gridcast-api
+  labels:
+    app.kubernetes.io/name: gridcast
+    app.kubernetes.io/component: api
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: gridcast
+    app.kubernetes.io/component: api
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http

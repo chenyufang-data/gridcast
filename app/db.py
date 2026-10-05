@@ -199,6 +199,28 @@ def day_text(day: date | pd.Timestamp) -> str:
     return pd.Timestamp(day).strftime("%Y-%m-%d")
 
 
+def ping(path: Path | None = None, timeout: float = 1.0) -> str | None:
+    """Readiness check: None when the store answers a read, else the reason.
+
+    Opens a *read-only* connection and reads one row. Unlike :func:`connect`, which runs
+    the schema, migrations and a write on every call and may wait up to 60 s behind a
+    writer, this never takes a write lock (in WAL mode readers don't wait for writers)
+    and never creates the file.
+    """
+    db_path = Path(path) if path is not None else DB_PATH
+    if not db_path.exists():
+        return f"database {db_path} does not exist yet"
+    try:
+        conn = sqlite3.connect(f"{db_path.resolve().as_uri()}?mode=ro", uri=True, timeout=timeout)
+        try:
+            conn.execute("SELECT 1 FROM zones LIMIT 1").fetchone()
+        finally:
+            conn.close()
+    except sqlite3.Error as exc:
+        return f"database not readable: {exc}"
+    return None
+
+
 def connect(path: Path | None = None) -> sqlite3.Connection:
     """Open (and initialise) the database; every call gets its own connection."""
     db_path = Path(path) if path is not None else DB_PATH
