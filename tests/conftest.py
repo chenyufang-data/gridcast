@@ -34,6 +34,9 @@ os.environ.setdefault("LLM_PROVIDER", "none")
 os.environ.setdefault("WRITE_RATE_PER_MIN", "6000")
 os.environ.setdefault("WRITE_RATE_BURST", "1000")
 os.environ.setdefault("API_BASE", "http://127.0.0.1:9")
+# a developer's shell must not leak a Kubernetes model pin or a fixture archive into the suite
+for _name in ("REQUIRE_TFT", "TFT_EXPECTED_VERSION", "NYISO_ARCHIVE_BASE"):
+    os.environ.pop(_name, None)
 
 from tests.synthetic import SyntheticNYISO  # noqa: E402
 

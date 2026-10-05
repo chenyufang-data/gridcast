@@ -25,7 +25,7 @@ from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from app import __version__, scheduler, service
+from app import __version__, db, scheduler, service
 from app.log import configure_logging
 from app.serving import registry
 from src.config import DEMO_DEFAULT_ZONE, MARKET_TZ, NYISO_ARCHIVE_BASE
@@ -78,6 +78,10 @@ def client_key(request: Request) -> str:
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     if not ADMIN_TOKEN:
         log.warning("ADMIN_TOKEN is not set: every write endpoint will answer 503")
+    try:  # create or migrate the schema once, so a fresh volume is ready at once
+        db.connect().close()
+    except Exception:
+        log.exception("could not initialise the store at %s", db.DB_PATH)
     status = registry.reload()
     log.info("models: %s", status["tft"].get("version") or status["tft"].get("error"))
     if scheduler.ENABLED:
@@ -143,6 +147,29 @@ def _range(start: str | None, end: str | None, days: int = 7) -> tuple[date, dat
 
 
 # ─── health, models, jobs ─────────────────────────────────────────────────────────────
+@app.get("/livez")
+async def livez() -> dict[str, str]:
+    """Liveness: the event loop answers. No I/O, no dependencies, on purpose: a liveness
+    check that touched the store would restart a healthy process during a long write."""
+    return {"status": "ok"}
+
+
+@app.get("/readyz", response_model=None)
+def readyz() -> dict[str, Any] | JSONResponse:
+    """Readiness: the store answers a read-only query and, when REQUIRE_TFT is set, the
+    pinned TFT bundle is the one loaded. 503 with the reasons otherwise. External sources
+    (NYISO, Open-Meteo, Vertex) are not checked: their outages degrade features only."""
+    db_problem = db.ping()
+    model_ok, model_problem = registry.ready()
+    body: dict[str, Any] = {
+        "ready": db_problem is None and model_ok,
+        "checks": {"database": db_problem or "ok", "model": model_problem or "ok"},
+        "model_version": registry.tft.version if registry.tft is not None else None,
+        "pinned_version": registry.expected_version,
+    }
+    return body if body["ready"] else JSONResponse(body, 503)
+
+
 @app.get("/health")
 def health() -> dict[str, Any]:
     now = datetime.now(MARKET_TZ)
@@ -184,12 +211,20 @@ def jobs() -> dict[str, Any]:
     }
 
 
-@app.post("/admin/jobs/{name}/run")
-def run_job(name: str) -> dict[str, Any]:
-    """Run a scheduler job now: forecast_all, ingest_score, isolf_refresh or retention."""
+@app.post("/admin/jobs/{name}/run", response_model=None)
+def run_job(name: str) -> dict[str, Any] | JSONResponse:
+    """Run a scheduler job now: forecast_all, ingest_score, isolf_refresh or retention.
+
+    200 when it succeeded, 409 when the same job is already running (nothing is started),
+    500 when it failed: a Kubernetes CronJob trigger retries on 5xx and stops on 2xx/409.
+    """
     if name not in scheduler.JOB_BY_NAME:
         raise HTTPException(404, f"unknown job {name!r}")
-    return scheduler.run_job(name)
+    try:
+        result = scheduler.run_job(name)
+    except scheduler.JobBusy as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return result if result["status"] == "ok" else JSONResponse(result, 500)
 
 
 @app.post("/admin/ingest")
