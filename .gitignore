@@ -85,3 +85,6 @@ docs/*.wav
 docs/*.srt
 docs/k8s_manual.md
 docs/k8s-plan.md
+
+# GKE trial evidence saved by deploy/k8s/gke/teardown.sh (cluster outputs, logs)
+k8s-trial/

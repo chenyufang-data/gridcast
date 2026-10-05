@@ -19,6 +19,7 @@ import yaml
 
 K8S = Path(__file__).resolve().parent.parent / "deploy" / "k8s"
 OVERLAYS = ("kind", "gke")
+SEED_OVERLAYS = ("kind-seed", "gke-seed")  # an environment plus components/seed
 KUBECTL = shutil.which("kubectl")
 
 
@@ -47,6 +48,8 @@ def pod_specs(docs: list[dict[str, Any]]) -> list[tuple[str, dict[str, Any]]]:
             specs.append(
                 (d["metadata"]["name"], d["spec"]["jobTemplate"]["spec"]["template"]["spec"])
             )
+        elif d["kind"] == "Job":
+            specs.append((d["metadata"]["name"], d["spec"]["template"]["spec"]))
     return specs
 
 
@@ -79,7 +82,7 @@ def test_the_in_app_scheduler_is_off(overlay: str) -> None:
     assert params["data"]["SCHEDULER_ENABLED"] == "0"
 
 
-@pytest.mark.parametrize("overlay", OVERLAYS)
+@pytest.mark.parametrize("overlay", OVERLAYS + SEED_OVERLAYS)
 def test_every_container_has_measured_resources_and_runs_hardened(overlay: str) -> None:
     for name, spec in pod_specs(render(overlay)):
         assert spec.get("automountServiceAccountToken") is False, name
@@ -102,7 +105,7 @@ def test_probes_split_liveness_from_readiness(overlay: str) -> None:
     assert c["readinessProbe"]["httpGet"]["path"] == "/readyz"
 
 
-@pytest.mark.parametrize("overlay", OVERLAYS)
+@pytest.mark.parametrize("overlay", OVERLAYS + SEED_OVERLAYS)
 def test_images_are_never_floating(overlay: str) -> None:
     for name, spec in pod_specs(render(overlay)):
         for c in spec.get("initContainers", []) + spec["containers"]:
@@ -125,7 +128,7 @@ def test_no_secret_material_in_the_manifests() -> None:
         if p.is_file() and patterns.search(p.read_text(encoding="utf-8", errors="ignore"))
     ]
     assert hits == []
-    for overlay in OVERLAYS if KUBECTL else ():
+    for overlay in OVERLAYS + SEED_OVERLAYS if KUBECTL else ():
         assert not by_kind(render(overlay), "Secret")
 
 
@@ -233,7 +236,7 @@ def test_the_kind_pin_is_the_committed_fixture_bundle() -> None:
     assert _model_config(render("kind"))["TFT_EXPECTED_VERSION"] == bundle.version
 
 
-@pytest.mark.parametrize("overlay", OVERLAYS)
+@pytest.mark.parametrize("overlay", OVERLAYS + SEED_OVERLAYS)
 def test_every_object_lives_in_the_gridcast_namespace(overlay: str) -> None:
     # objects an overlay adds don't inherit the base's namespace: this caught the archive
     # fixture landing in `default`, where the API could not resolve it
@@ -243,3 +246,49 @@ def test_every_object_lives_in_the_gridcast_namespace(overlay: str) -> None:
         if d["kind"] != "Namespace" and d["metadata"].get("namespace") != "gridcast"
     ]
     assert outside == []
+
+
+# ---------------------------------------------------------------------------- seed
+def _object_id(d: dict[str, Any]) -> tuple[str, str]:
+    return d["kind"], d["metadata"]["name"]
+
+
+def _api(docs: list[dict[str, Any]]) -> dict[str, Any]:
+    return next(d for d in by_kind(docs, "Deployment") if d["metadata"]["name"] == "gridcast-api")
+
+
+@pytest.mark.parametrize("overlay", SEED_OVERLAYS)
+def test_the_seed_is_the_only_writer_while_it_runs(overlay: str) -> None:
+    docs = render(overlay)
+    assert _api(docs)["spec"]["replicas"] == 0
+    assert all(cj["spec"]["suspend"] is True for cj in by_kind(docs, "CronJob"))
+    (job,) = by_kind(docs, "Job")
+    pod = job["spec"]["template"]["spec"]
+    api = _api(docs)["spec"]["template"]["spec"]
+    claims = [
+        v["persistentVolumeClaim"]["claimName"]
+        for v in pod["volumes"]
+        if "persistentVolumeClaim" in v
+    ]
+    assert claims == ["gridcast-data"]
+    # the seed runs the API's own image, model and settings
+    assert pod["containers"][0]["image"] == api["containers"][0]["image"]
+    assert pod["initContainers"][0]["image"] == api["initContainers"][0]["image"]
+    assert pod["containers"][0]["envFrom"] == api["containers"][0]["envFrom"]
+    assert job["spec"]["backoffLimit"] <= 1 and job["spec"]["activeDeadlineSeconds"] > 0
+
+
+@pytest.mark.parametrize("overlay", SEED_OVERLAYS)
+def test_a_seed_overlay_is_its_environment_plus_the_seed_only(overlay: str) -> None:
+    # re-applying the plain environment after the seed must restore it exactly
+    seeded = [d for d in render(overlay) if d["kind"] != "Job"]
+    for d in seeded:
+        if d["kind"] == "CronJob":
+            del d["spec"]["suspend"]
+        elif d["kind"] == "Deployment" and d["metadata"]["name"] == "gridcast-api":
+            d["spec"]["replicas"] = 1
+    plain = render(overlay.removesuffix("-seed"))
+    for d in plain:
+        if d["kind"] == "CronJob":
+            d["spec"].pop("suspend", None)
+    assert sorted(seeded, key=_object_id) == sorted(plain, key=_object_id)

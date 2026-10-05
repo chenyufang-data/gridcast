@@ -1,0 +1,27 @@
+# GKE with the seed: apply this once after the first deploy, wait for the Job, then
+# re-apply overlays/gke. deploy/k8s/seed.sh gke does exactly that.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: gridcast
+
+resources:
+  - ../gke
+
+components:
+  - ../../components/seed
+
+# 15 months, as on the VM (961 s there, 149 s on kind on the laptop): enough history for
+# the 365-day tree window and the conformal band; 30 trailing days fill the accuracy views
+# on day one. Like the API, the seed may burst to two cores above its 500m request.
+patches:
+  - target:
+      kind: Job
+      name: gridcast-seed
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/args
+        value: ["--months", "15", "--forecast-days", "30"]
+      - op: add
+        path: /spec/template/spec/containers/0/resources/limits/cpu
+        value: "2"

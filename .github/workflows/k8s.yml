@@ -41,7 +41,7 @@ jobs:
       - name: Validate the rendered manifests
         run: |
           curl -fsSL "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" | tar xz kubeconform
-          for overlay in kind gke; do
+          for overlay in kind gke kind-seed gke-seed; do
             echo "== $overlay"
             kubectl kustomize "deploy/k8s/overlays/$overlay" | ./kubeconform -strict -summary -
           done

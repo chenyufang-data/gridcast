@@ -1,0 +1,24 @@
+# kind with the seed, to rehearse the procedure on the laptop: deploy/k8s/seed.sh kind.
+# The synthetic archive holds about two months and the fixture model covers two zones (the
+# trees forecast the rest), so the seed is kept small. No weather: kind stays offline like
+# the rest of its overlay, and the fixture model was trained without weather inputs (with a
+# weather file on the volume it would refuse the inputs and the trees would serve).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: gridcast
+
+resources:
+  - ../kind
+
+components:
+  - ../../components/seed
+
+patches:
+  - target:
+      kind: Job
+      name: gridcast-seed
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/args
+        value: ["--months", "1", "--forecast-days", "1", "--skip-weather"]

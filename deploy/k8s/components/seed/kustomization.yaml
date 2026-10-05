@@ -1,0 +1,49 @@
+# The seed, as a Kustomize component added on top of an environment (overlays/*-seed):
+# - the API Deployment goes to zero replicas, so the seed Job is the only writer;
+# - every CronJob is suspended, so no trigger calls the absent API meanwhile;
+# - the Job runs the API's own images, copied from the rendered Deployment, so the seed
+#   needs no image list of its own and push.sh keeps editing one file.
+# Re-applying the plain environment overlay afterwards brings the API back and resumes the
+# schedules (kubectl apply drops the fields the new configuration no longer sets).
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+resources:
+  - seed-job.yaml
+
+patches:
+  - target:
+      kind: Deployment
+      name: gridcast-api
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 0
+  - target:
+      kind: CronJob
+    patch: |-
+      - op: add
+        path: /spec/suspend
+        value: true
+
+replacements:
+  - source:
+      kind: Deployment
+      name: gridcast-api
+      fieldPath: spec.template.spec.containers.[name=api].image
+    targets:
+      - select:
+          kind: Job
+          name: gridcast-seed
+        fieldPaths:
+          - spec.template.spec.containers.[name=seed].image
+  - source:
+      kind: Deployment
+      name: gridcast-api
+      fieldPath: spec.template.spec.initContainers.[name=model].image
+    targets:
+      - select:
+          kind: Job
+          name: gridcast-seed
+        fieldPaths:
+          - spec.template.spec.initContainers.[name=model].image

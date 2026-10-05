@@ -8,8 +8,9 @@ Windows. Checks, in order:
 
 1. /readyz answers 200 and the served TFT is exactly the pinned version;
 2. the ingest CronJob, run once by hand, completes and leaves yesterday ingested;
-3. a forecast of yesterday for N.Y.C. is served by the pinned TFT and scored on creation;
-4. a tree retrain of yesterday for WEST is stored and scored on creation;
+3. a forecast of yesterday for N.Y.C. is served by the pinned TFT and scored (on creation,
+   or earlier by a seed that made the same forecast);
+4. a tree retrain of yesterday for WEST is stored and scored;
 5. the UI answers its health check and serves its page.
 """
 
@@ -69,6 +70,17 @@ def call(method: str, path: str, port: int = API, token: str | None = None) -> t
         return status, raw
 
 
+def score_of(fc: dict[str, Any]) -> dict[str, Any]:
+    """The forecast's score: in the answer when it was just created, else as stored (after a seed)."""
+    if fc.get("new") is not False:
+        return fc.get("score") or {}
+    zone = fc["zone"].lower().replace(".", "").replace(" ", "_")
+    _, stored = call(
+        "GET", f"/zones/{zone}/forecasts/{fc['target_date']}?version={fc['model_version']}"
+    )
+    return stored.get("score") or {}
+
+
 def step(title: str) -> None:
     print(f"\n== {title}", flush=True)
 
@@ -118,14 +130,14 @@ def main() -> None:
         step("3. a forecast of yesterday for N.Y.C., served by the pinned TFT")
         status, fc = call("POST", f"/zones/nyc/forecasts?target_date={yesterday}", token=token)
         require(status == 200, f"forecast stored (HTTP {status})")
-        score = fc.get("score") or {}
+        score = score_of(fc)
         print(
             f"   model {fc['model']}, {len(fc['values'])} slots, MAPE {score.get('mape_hour')} "
             "(tiny synthetic fixture: this checks the plumbing, not accuracy)"
         )
         require(fc["model"] == pin, "N.Y.C. served by the pinned TFT")
         require(len(fc["values"]) >= 92, "a full day of 15-minute slots")
-        require(score.get("coverage") == 1.0, "scored on creation against the day's actuals")
+        require(score.get("coverage") == 1.0, "scored against the day's actuals")
 
         step("4. a tree retrain of yesterday for WEST")
         status, lg = call(
@@ -133,7 +145,7 @@ def main() -> None:
         )
         require(status == 200, f"retrain stored (HTTP {status})")
         require(lg["model"].startswith("lgbm:"), f"trees served ({lg['model']})")
-        require((lg.get("score") or {}).get("coverage") == 1.0, "scored on creation")
+        require(score_of(lg).get("coverage") == 1.0, "scored against the day's actuals")
 
         step("5. the UI")
         status, body = call("GET", "/_stcore/health", port=UI)
