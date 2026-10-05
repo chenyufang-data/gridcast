@@ -83,3 +83,4 @@ docs/*.mkv
 docs/*.mov
 docs/*.wav
 docs/*.srt
+docs/k8s_manual.md
