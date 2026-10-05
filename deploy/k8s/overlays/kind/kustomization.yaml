@@ -12,6 +12,12 @@ images:
     newTag: ci
   - name: gridcast-ui
     newTag: ci
+  # the CronJob trigger needs only Python's standard library: reuse the API image, which is
+  # already loaded, instead of pulling python:3.11-slim from Docker Hub (rate limits in CI;
+  # `kind load` also fails on multi-platform images)
+  - name: python
+    newName: gridcast-api
+    newTag: ci
 
 configMapGenerator:
   - name: gridcast-config
@@ -19,3 +25,12 @@ configMapGenerator:
     literals:
       - WEATHER_REFRESH=0
       - LLM_PROVIDER=none
+
+patches:
+  # schedules never fire on kind; `kubectl create job --from=cronjob/...` still works
+  - target:
+      kind: CronJob
+    patch: |-
+      - op: add
+        path: /spec/suspend
+        value: true

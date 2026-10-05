@@ -1,0 +1,284 @@
+# The daily jobs, formerly the in-app scheduler thread (switched off: SCHEDULER_ENABLED=0).
+# Each run starts a small trigger pod that POSTs /admin/jobs/<name>/run to the API, which
+# does the work: the CronJob owns *when*, the API owns *the data* (SQLite has one writer).
+# - timeZone: New York wall-clock times, daylight saving included.
+# - concurrencyPolicy Forbid: a scheduled run never overlaps the previous one. Manual runs
+#   (kubectl create job --from=cronjob/...) bypass it; the API's per-job lock answers 409.
+# - startingDeadlineSeconds: a start missed while the controller was down still runs within
+#   6 h (2 days for the monthly job); the jobs themselves back-fill up to 45 missing days.
+# - backoffLimit 6: an unreachable API is retried for several minutes.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: gridcast-forecast-all
+  labels:
+    app.kubernetes.io/name: gridcast
+    app.kubernetes.io/component: cron
+spec:
+  schedule: "30 4 * * *"
+  timeZone: America/New_York
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 21600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 6
+      activeDeadlineSeconds: 2400
+      ttlSecondsAfterFinished: 259200
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: gridcast
+            app.kubernetes.io/component: cron
+        spec:
+          serviceAccountName: gridcast-cron
+          automountServiceAccountToken: false
+          enableServiceLinks: false
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: trigger
+              image: python:3.11-slim
+              command: ["python", "/trigger/trigger.py", "forecast_all"]
+              envFrom:
+                - configMapRef:
+                    name: gridcast-config
+              env:
+                - name: ADMIN_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: gridcast-admin
+                      key: ADMIN_TOKEN
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  memory: 64Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop:
+                    - ALL
+              volumeMounts:
+                - name: trigger
+                  mountPath: /trigger
+                  readOnly: true
+          volumes:
+            - name: trigger
+              configMap:
+                name: gridcast-trigger
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: gridcast-ingest-score
+  labels:
+    app.kubernetes.io/name: gridcast
+    app.kubernetes.io/component: cron
+spec:
+  schedule: "30 6 * * *"
+  timeZone: America/New_York
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 21600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 6
+      activeDeadlineSeconds: 2400
+      ttlSecondsAfterFinished: 259200
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: gridcast
+            app.kubernetes.io/component: cron
+        spec:
+          serviceAccountName: gridcast-cron
+          automountServiceAccountToken: false
+          enableServiceLinks: false
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: trigger
+              image: python:3.11-slim
+              command: ["python", "/trigger/trigger.py", "ingest_score"]
+              envFrom:
+                - configMapRef:
+                    name: gridcast-config
+              env:
+                - name: ADMIN_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: gridcast-admin
+                      key: ADMIN_TOKEN
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  memory: 64Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop:
+                    - ALL
+              volumeMounts:
+                - name: trigger
+                  mountPath: /trigger
+                  readOnly: true
+          volumes:
+            - name: trigger
+              configMap:
+                name: gridcast-trigger
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: gridcast-isolf-refresh
+  labels:
+    app.kubernetes.io/name: gridcast
+    app.kubernetes.io/component: cron
+spec:
+  schedule: "30 8 * * *"
+  timeZone: America/New_York
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 21600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 6
+      activeDeadlineSeconds: 2400
+      ttlSecondsAfterFinished: 259200
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: gridcast
+            app.kubernetes.io/component: cron
+        spec:
+          serviceAccountName: gridcast-cron
+          automountServiceAccountToken: false
+          enableServiceLinks: false
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: trigger
+              image: python:3.11-slim
+              command: ["python", "/trigger/trigger.py", "isolf_refresh"]
+              envFrom:
+                - configMapRef:
+                    name: gridcast-config
+              env:
+                - name: ADMIN_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: gridcast-admin
+                      key: ADMIN_TOKEN
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  memory: 64Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop:
+                    - ALL
+              volumeMounts:
+                - name: trigger
+                  mountPath: /trigger
+                  readOnly: true
+          volumes:
+            - name: trigger
+              configMap:
+                name: gridcast-trigger
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: gridcast-retention
+  labels:
+    app.kubernetes.io/name: gridcast
+    app.kubernetes.io/component: cron
+spec:
+  schedule: "0 7 1 * *"
+  timeZone: America/New_York
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 172800
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 6
+      activeDeadlineSeconds: 2400
+      ttlSecondsAfterFinished: 259200
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: gridcast
+            app.kubernetes.io/component: cron
+        spec:
+          serviceAccountName: gridcast-cron
+          automountServiceAccountToken: false
+          enableServiceLinks: false
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: trigger
+              image: python:3.11-slim
+              command: ["python", "/trigger/trigger.py", "retention"]
+              envFrom:
+                - configMapRef:
+                    name: gridcast-config
+              env:
+                - name: ADMIN_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: gridcast-admin
+                      key: ADMIN_TOKEN
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  memory: 64Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop:
+                    - ALL
+              volumeMounts:
+                - name: trigger
+                  mountPath: /trigger
+                  readOnly: true
+          volumes:
+            - name: trigger
+              configMap:
+                name: gridcast-trigger

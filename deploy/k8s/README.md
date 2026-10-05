@@ -11,6 +11,17 @@ separate project.
 | `overlays/kind/` | locally built `:ci` images, no weather refresh, keyword chat; `kind-config.yaml` pins the node image (Kubernetes v1.36.4) |
 | `overlays/gke/` | Artifact Registry images pinned by digest, a single-pod volume (`ReadWriteOncePod`), two UI replicas with session affinity, Vertex AI chat |
 
+The daily jobs run as four CronJobs (`base/cronjobs.yaml`) in New York time, with
+`concurrencyPolicy: Forbid`, a catch-up deadline and retries. Each run starts a small
+trigger pod (`base/trigger.py`) that asks the API to run the job, so the API stays the only
+writer, and the in-app scheduler thread is off (`SCHEDULER_ENABLED=0`). On kind the
+schedules are suspended; run a job by hand:
+
+```powershell
+kubectl -n gridcast create job --from=cronjob/gridcast-ingest-score manual-1
+kubectl -n gridcast logs -f job/manual-1
+```
+
 The decisions that shape it:
 
 - **One writer for SQLite.** The API runs as exactly one replica with `strategy: Recreate`, and only it mounts the data volume. There is no autoscaler.

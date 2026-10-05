@@ -127,3 +127,71 @@ def test_no_secret_material_in_the_manifests() -> None:
     assert hits == []
     for overlay in OVERLAYS if KUBECTL else ():
         assert not by_kind(render(overlay), "Secret")
+
+
+# ---------------------------------------------------------------------------- CronJobs
+@pytest.mark.parametrize("overlay", OVERLAYS)
+def test_cronjobs_mirror_the_scheduler_and_never_overlap(overlay: str) -> None:
+    from app.scheduler import JOB_BY_NAME
+
+    cronjobs = by_kind(render(overlay), "CronJob")
+    seen = set()
+    for cj in cronjobs:
+        spec = cj["spec"]
+        command = spec["jobTemplate"]["spec"]["template"]["spec"]["containers"][0]["command"]
+        name = command[-1]
+        job = JOB_BY_NAME[name]
+        seen.add(name)
+        day = "1" if job.monthly else "*"
+        assert spec["schedule"] == f"{job.at.minute} {job.at.hour} {day} * *", name
+        assert spec["timeZone"] == "America/New_York"
+        assert spec["concurrencyPolicy"] == "Forbid"
+        assert spec["startingDeadlineSeconds"] >= 21600
+        assert spec["jobTemplate"]["spec"]["backoffLimit"] >= 3
+        assert spec.get("suspend", False) is (overlay == "kind")  # kind never fires on its own
+    assert seen == set(JOB_BY_NAME)
+
+
+def _load_trigger() -> Any:
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("trigger", K8S / "base" / "trigger.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.parametrize(("status", "exit_code"), [(200, 0), (409, 0), (500, 1), (401, 1)])
+def test_trigger_exit_codes(status: int, exit_code: int, monkeypatch: pytest.MonkeyPatch) -> None:
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    seen: dict[str, str] = {}
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:  # noqa: N802 (http.server API)
+            seen["path"] = self.path
+            seen["token"] = self.headers.get("X-Admin-Token", "")
+            self.send_response(status)
+            self.end_headers()
+            self.wfile.write(b'{"status": "x"}')
+
+        def log_message(self, *args: object) -> None:  # keep test output quiet
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        monkeypatch.setenv("API_BASE", f"http://127.0.0.1:{server.server_port}")
+        monkeypatch.setenv("ADMIN_TOKEN", "t0ken")
+        assert _load_trigger().main(["trigger.py", "ingest_score"]) == exit_code
+    finally:
+        server.shutdown()
+    assert seen == {"path": "/admin/jobs/ingest_score/run", "token": "t0ken"}
+
+
+def test_trigger_fails_when_the_api_is_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("API_BASE", "http://127.0.0.1:9")
+    monkeypatch.setenv("TRIGGER_TIMEOUT_SECONDS", "2")
+    assert _load_trigger().main(["trigger.py", "forecast_all"]) == 1

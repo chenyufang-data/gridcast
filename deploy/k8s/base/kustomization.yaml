@@ -20,6 +20,7 @@ resources:
   - ui-deployment.yaml
   - ui-service.yaml
   - networkpolicy.yaml
+  - cronjobs.yaml
 
 # Non-secret settings. The generated name carries a content hash, so any change rolls the
 # pods, and old names stay behind for `kubectl rollout undo`. ADMIN_TOKEN is not here: it
@@ -28,3 +29,7 @@ configMapGenerator:
   - name: gridcast-config
     envs:
       - params.env
+  # the CronJob trigger script, mounted at /trigger in python:3.11-slim (no curl image)
+  - name: gridcast-trigger
+    files:
+      - trigger.py
