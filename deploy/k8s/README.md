@@ -22,6 +22,20 @@ kubectl -n gridcast create job --from=cronjob/gridcast-ingest-score manual-1
 kubectl -n gridcast logs -f job/manual-1
 ```
 
+The served model ships as its own tiny image (`model/Dockerfile`: busybox plus `tft.onnx`
+and `tft.json`). An init container copies it into the API pod, never onto the data
+volume. The overlays reference it by digest and pin its identity in the `gridcast-model`
+ConfigMap, which only the API reads (`TFT_EXPECTED_VERSION`, with `REQUIRE_TFT=1`). A pod
+whose bundle doesn't match never becomes ready. A model rollout is an ordinary
+Deployment rollout, and `kubectl rollout undo deploy/gridcast-api` restores the previous
+model with its pin. kind serves `fixtures/tft-tiny`, a 185 KiB bundle trained on
+synthetic data by `fixtures/make_tiny_bundle.py`:
+
+```powershell
+docker build -f deploy/k8s/model/Dockerfile -t gridcast-model:fixture deploy/k8s/fixtures/tft-tiny
+kind load docker-image --name gridcast gridcast-model:fixture
+```
+
 The decisions that shape it:
 
 - **One writer for SQLite.** The API runs as exactly one replica with `strategy: Recreate`, and only it mounts the data volume. There is no autoscaler.
@@ -39,7 +53,8 @@ PowerShell from the repo root, with Docker Desktop running and `kind` installed
 kind create cluster --config deploy/k8s/overlays/kind/kind-config.yaml
 docker build -t gridcast-api:ci .
 docker build -f Dockerfile.frontend -t gridcast-ui:ci .
-kind load docker-image --name gridcast gridcast-api:ci gridcast-ui:ci
+docker build -f deploy/k8s/model/Dockerfile -t gridcast-model:fixture deploy/k8s/fixtures/tft-tiny
+kind load docker-image --name gridcast gridcast-api:ci gridcast-ui:ci gridcast-model:fixture
 
 kubectl apply -f deploy/k8s/base/namespace.yaml
 $token = .\.venv\Scripts\python.exe -c "import secrets; print(secrets.token_urlsafe(32))"

@@ -16,7 +16,11 @@ images:
   - name: gridcast-ui
     newName: us-east1-docker.pkg.dev/nyiso-gridcast-k8s/gridcast/ui
     digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+  - name: gridcast-model
+    newName: us-east1-docker.pkg.dev/nyiso-gridcast-k8s/gridcast/model
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
 
+# The model pin and its digest above change together, in one commit, through push.sh.
 configMapGenerator:
   - name: gridcast-config
     behavior: merge
@@ -25,8 +29,21 @@ configMapGenerator:
       - VERTEX_PROJECT=nyiso-gridcast-k8s
       - VERTEX_LOCATION=us-central1
       - VERTEX_MODEL=gemini-2.5-flash-lite
+  - name: gridcast-model
+    behavior: merge
+    literals:
+      - REQUIRE_TFT=1
+      - TFT_EXPECTED_VERSION=tft-onnx:e979ee4c9f6d:2026-09-19T09:00:00+00:00
 
 patches:
+  - target:
+      kind: Deployment
+      name: gridcast-api
+    patch: |-
+      - op: add
+        path: /metadata/annotations
+        value:
+          kubernetes.io/change-cause: "model tft-onnx:e979ee4c9f6d:2026-09-19T09:00:00+00:00"
   # one pod per volume, enforced by the CSI driver; 10 GiB is the balanced PD minimum
   - target:
       kind: PersistentVolumeClaim

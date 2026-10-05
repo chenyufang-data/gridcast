@@ -29,6 +29,10 @@ configMapGenerator:
   - name: gridcast-config
     envs:
       - params.env
+  # the model pin, read by the API only: a model rollout restarts the API, never the UI
+  - name: gridcast-model
+    envs:
+      - model.env
   # the CronJob trigger script, mounted at /trigger in python:3.11-slim (no curl image)
   - name: gridcast-trigger
     files:

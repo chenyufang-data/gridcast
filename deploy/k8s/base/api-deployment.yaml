@@ -41,6 +41,30 @@ spec:
         fsGroupChangePolicy: OnRootMismatch
         seccompProfile:
           type: RuntimeDefault
+      initContainers:
+        # copies the digest-pinned model image's bundle into the pod; nothing model-related
+        # lives on the data volume, so a rollback of the template is a rollback of the model
+        - name: model
+          image: gridcast-model
+          command:
+            - sh
+            - -c
+            - mkdir -p /models/tft && cp /model/tft.onnx /model/tft.json /models/tft/ && sha256sum /models/tft/tft.onnx
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: models
+              mountPath: /models
       containers:
         - name: api
           image: gridcast-api
@@ -50,6 +74,8 @@ spec:
           envFrom:
             - configMapRef:
                 name: gridcast-config
+            - configMapRef:
+                name: gridcast-model
           env:
             - name: ADMIN_TOKEN
               valueFrom:

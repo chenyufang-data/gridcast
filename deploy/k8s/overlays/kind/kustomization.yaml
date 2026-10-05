@@ -18,15 +18,34 @@ images:
   - name: python
     newName: gridcast-api
     newTag: ci
+  # the tiny synthetic-data bundle (fixtures/tft-tiny), built into gridcast-model:fixture
+  - name: gridcast-model
+    newTag: fixture
 
+# The model pin: the API is ready only when the loaded bundle is exactly this identity.
+# The fixture is old (fit 2025-09-09), so the age limit is lifted on kind.
 configMapGenerator:
   - name: gridcast-config
     behavior: merge
     literals:
       - WEATHER_REFRESH=0
       - LLM_PROVIDER=none
+  - name: gridcast-model
+    behavior: merge
+    literals:
+      - REQUIRE_TFT=1
+      - TFT_EXPECTED_VERSION=tft-onnx:4fcfd208b746:2025-09-09T09:00:00+00:00
+      - TFT_MAX_AGE_DAYS=100000
 
 patches:
+  - target:
+      kind: Deployment
+      name: gridcast-api
+    patch: |-
+      - op: add
+        path: /metadata/annotations
+        value:
+          kubernetes.io/change-cause: "model tft-onnx:4fcfd208b746:2025-09-09T09:00:00+00:00 (synthetic fixture)"
   # schedules never fire on kind; `kubectl create job --from=cronjob/...` still works
   - target:
       kind: CronJob

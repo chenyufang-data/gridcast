@@ -195,3 +195,39 @@ def test_trigger_fails_when_the_api_is_unreachable(monkeypatch: pytest.MonkeyPat
     monkeypatch.setenv("API_BASE", "http://127.0.0.1:9")
     monkeypatch.setenv("TRIGGER_TIMEOUT_SECONDS", "2")
     assert _load_trigger().main(["trigger.py", "forecast_all"]) == 1
+
+
+# ---------------------------------------------------------------------------- model pin
+def _model_config(docs: list[dict[str, Any]]) -> dict[str, str]:
+    cm = next(
+        c for c in by_kind(docs, "ConfigMap") if c["metadata"]["name"].startswith("gridcast-model")
+    )
+    return dict(cm["data"])
+
+
+@pytest.mark.parametrize("overlay", OVERLAYS)
+def test_the_model_is_a_pinned_image_copied_by_an_init_container(overlay: str) -> None:
+    docs = render(overlay)
+    deployments = {d["metadata"]["name"]: d for d in by_kind(docs, "Deployment")}
+    api = deployments["gridcast-api"]["spec"]["template"]["spec"]
+    init = next(c for c in api["initContainers"] if c["name"] == "model")
+    assert "gridcast-model" in init["image"] or init["image"].split("@")[0].endswith("/model")
+    models = next(v for v in api["volumes"] if v["name"] == "models")
+    assert "emptyDir" in models  # never on the data volume: a rollback restores the model
+    pin = _model_config(docs)
+    assert pin["REQUIRE_TFT"] == "1" and pin["TFT_EXPECTED_VERSION"].startswith("tft-onnx:")
+    assert pin["TFT_BUNDLE_DIR"] == "/models/tft"
+    change_cause = deployments["gridcast-api"]["metadata"]["annotations"][
+        "kubernetes.io/change-cause"
+    ]
+    assert pin["TFT_EXPECTED_VERSION"] in change_cause
+    # the UI never reads the pin, so a model rollout restarts the API only
+    ui = deployments["gridcast-ui"]["spec"]["template"]["spec"]["containers"][0]
+    assert all(not e["configMapRef"]["name"].startswith("gridcast-model") for e in ui["envFrom"])
+
+
+def test_the_kind_pin_is_the_committed_fixture_bundle() -> None:
+    from models.tft_onnx import OnnxTFT
+
+    bundle = OnnxTFT.load(K8S / "fixtures" / "tft-tiny")  # raises if FEATURE_VERSION moved on
+    assert _model_config(render("kind"))["TFT_EXPECTED_VERSION"] == bundle.version

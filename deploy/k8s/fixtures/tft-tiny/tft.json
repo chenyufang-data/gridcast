@@ -1,0 +1,53 @@
+{
+  "format": "gridcast-tft-onnx-1",
+  "feature_version": "nyiso-fv1",
+  "zones": [
+    "N.Y.C.",
+    "WEST"
+  ],
+  "scale": {
+    "N.Y.C.": 5886.480958384667,
+    "WEST": 1669.4129676414082
+  },
+  "enc_len": 192,
+  "dec_len": 176,
+  "quantiles": [
+    0.1,
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7,
+    0.9
+  ],
+  "known_cols": [
+    "tod_sin",
+    "tod_cos",
+    "is_holiday",
+    "holiday_tomorrow",
+    "rel_pos"
+  ],
+  "wmean": [
+    0.0,
+    0.0,
+    0.029411764815449715,
+    0.029411764815449715,
+    0.0
+  ],
+  "wstd": [
+    0.7071067690849304,
+    0.7071067690849304,
+    0.16895771026611328,
+    0.16895771026611328,
+    1.0
+  ],
+  "hidden": 8,
+  "heads": 2,
+  "fit_cutoff": "2025-09-09T09:00:00+00:00",
+  "window_days": 34,
+  "epochs": 2,
+  "val_pinball": 0.3689715564250946,
+  "torch_version": "2.11.0+cu128",
+  "max_abs_diff_vs_torch": 4.470348358154297e-07,
+  "onnx_sha256": "4fcfd208b74622efe9160161bb38b2839f045276b1fa42c502a296523738b096"
+}
