@@ -1,6 +1,7 @@
 # ⚡ gridcast — NYISO day-ahead zonal load forecasting
 
 [![CI](https://github.com/chenyufang-data/gridcast/actions/workflows/ci.yml/badge.svg)](https://github.com/chenyufang-data/gridcast/actions/workflows/ci.yml)
+[![k8s](https://github.com/chenyufang-data/gridcast/actions/workflows/k8s.yml/badge.svg)](https://github.com/chenyufang-data/gridcast/actions/workflows/k8s.yml)
 
 Day-ahead load forecasts for the eleven NYISO zones and the statewide total, built
 for the way the market actually settles: bids are due **05:00 ET on D−1**, and every
@@ -8,7 +9,7 @@ MWh of forecast error is settled at the **real-time price**. The product turns a
 15-minute forecast (a Temporal Fusion Transformer served as ONNX, LightGBM trees as the
 fallback) with P10–P90 bands into a cost-aware DAM bid, scores both in dollars against
 NYISO's own forecast, and fronts it all with a chat-driven web UI.
-PyTorch → ONNX Runtime · LightGBM · FastAPI · SQLite · Streamlit · Gemini on Vertex AI · Docker · Caddy.
+PyTorch → ONNX Runtime · LightGBM · FastAPI · SQLite · Streamlit · Gemini on Vertex AI · Docker · Caddy · Kubernetes (kind in CI, a GKE Autopilot trial).
 
 [![Fifteen seconds of the two-minute tour: a live LightGBM retrain lands as a second line next to the served TFT and is scored on the same actuals](docs/img/demo.gif)](https://gridcast.cyfang.org)
 
@@ -16,7 +17,7 @@ PyTorch → ONNX Runtime · LightGBM · FastAPI · SQLite · Streamlit · Gemini
 Overview of the live demo.*
 
 > **Live demo: <https://gridcast.cyfang.org>** (one small GCE VM; forecasts and scores refresh
-> every morning). Model, backtest, service, UI and deployment are done; the demo video is next.
+> every morning). Model, backtest, service, UI, deployment and the demo video are done.
 > The rules for what may become a headline number are in
 > [CONTRIBUTING.md](CONTRIBUTING.md#reporting-rules); every number below has a
 > one-command script in [scripts/](scripts/README.md) and an entry in
@@ -101,6 +102,7 @@ frontend/       Streamlit UI (api client, keyword router, Gemini/GitHub chat lay
 scripts/        one-command data pulls and reports behind every headline number
 tests/          offline suite; tests/synthetic.py = NYISO-shaped synthetic archive
 deploy/         Caddyfile, VM bootstrap script, seed script (backfill + first forecasts), GCE runbook
+deploy/k8s/     Kubernetes: Kustomize base, kind and GKE overlays, CronJobs, model image, CI smoke test, GKE trial scripts
 data/           README only; fetched data is cached here and gitignored
 docs/           experiment log
 results/        per-run backtest outputs (gitignored except each named run's summary tables)
@@ -211,6 +213,67 @@ or the model fails, the **keyword guide** answers with the same navigation. A re
 navigates closes the window and opens the view. Every chart follows one validated
 palette (forecast blue, actual orange, NYISO aqua, your bid yellow, dollars blue/red
 around zero), one axis per chart, and has a table view.
+
+## Kubernetes: kind in CI, a GKE trial
+
+The live demo stays on its VM. Next to it, [deploy/k8s/](deploy/k8s/README.md) runs the
+same images on Kubernetes: a Kustomize base, a `kind` overlay for the laptop and CI, and a
+`gke` overlay for a time-boxed trial on GKE Autopilot in a separate GCP project.
+
+- **One writer for SQLite.** The API runs as exactly one replica with `strategy: Recreate`
+  and is the only pod that mounts the data volume (`ReadWriteOncePod` on GKE, so a second
+  pod would stay Pending). There is no autoscaler; the UI scales on its own (two replicas
+  on GKE).
+- **CronJobs instead of the in-app scheduler.** Four CronJobs in New York time
+  (`concurrencyPolicy: Forbid`, catch-up deadlines, retries) start a small trigger pod that
+  asks the API to run the job, so the API stays the only writer. A duplicate run gets 409;
+  a failed one gets 500, and the Job retries.
+- **The model as a pinned image.** The ONNX bundle ships as its own image, referenced by
+  digest and copied into the API pod by an init container. The API is ready only when it
+  serves the pinned version (`/readyz`), so a model rollout is an ordinary rollout, and
+  `kubectl rollout undo` brings the previous model back.
+- **Measured sizes, hardened pods.** Requests and limits come from the VM's measured
+  memory and CPU (API 250m / 1 GiB, UI 100m / 512 MiB). Pods run as non-root on a
+  read-only filesystem with no service-account token, and a NetworkPolicy lets only the UI
+  and the job triggers call the API.
+- **Seeding without a second writer.** The seed runs as a Job while the API is scaled to
+  zero and the CronJobs are suspended; `seed.sh` stops the API, runs the Job and restores
+  both. Its memory was measured on kind before the trial: 425 MiB at most for 15 months of
+  the real archive, so the Job gets 1 GiB.
+
+**CI.** [k8s.yml](.github/workflows/k8s.yml) boots a kind cluster on every push that touches
+the app, the images or the manifests. It deploys the stack against a synthetic NYISO
+archive served inside the cluster and a tiny model trained on synthetic data, so no NYISO
+bytes and no cloud credentials are involved. It then smoke-tests readiness with the pinned
+model, a CronJob run, a TFT forecast and a tree retrain (both scored), and the UI, in about
+three minutes (five with a cold cache). A run with a deliberately wrong model pin failed at
+the rollout and uploaded the cluster's events and logs.
+
+**The GKE trial (72 hours from 2026-10-05).** Three scripts create and remove everything,
+from Git Bash on the laptop:
+
+```bash
+BILLING=<billing account id> deploy/k8s/gke/up.sh   # project, budget alert, registry, images by digest, cluster, deploy
+deploy/k8s/seed.sh gke                              # 15 months of the archive, with the API stopped
+deploy/k8s/gke/teardown.sh                          # saves the evidence, then leaves nothing that bills
+```
+
+The budget alert exists before anything bills, images are pinned by digest in a registry
+with immutable tags, and no script changes the gcloud default project, which stays the
+live site's. Access is `kubectl port-forward` only: no public address. Verified on the
+cluster:
+
+| Check | Result |
+|---|---|
+| Seed: 15 months of the archive and 30 forecast days, as a Job | 237 s, memory peak 430 MiB of its 1 GiB |
+| Chat through Workload Identity, no key anywhere | Gemini answers from the UI pod; the API pod gets 403 from Vertex AI |
+| NetworkPolicy (GKE Dataplane V2) | an unlabelled pod cannot reach the API; a pod labelled as the UI can |
+| Model pin | `/readyz` reports that the served TFT is the pinned version |
+| Requests | Autopilot kept the requests and burst limits as written |
+
+Estimated from list prices, the trial costs about $2.30 in pod requests for 72 hours, with the GKE
+free tier covering the cluster fee (an estimate, not yet a billing report). Still open
+while the trial runs: the scheduled jobs succeeding on two consecutive mornings.
 
 ## License
 
