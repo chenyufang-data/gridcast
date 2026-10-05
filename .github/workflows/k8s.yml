@@ -28,6 +28,8 @@ env:
   KIND_VERSION: v0.33.0
   KUBECTL_VERSION: v1.36.4
   KUBECONFORM_VERSION: v0.8.0
+  # keep the run's artifacts to the diagnostics bundle (no per-build records)
+  DOCKER_BUILD_RECORD_UPLOAD: "false"
 
 jobs:
   kind:
