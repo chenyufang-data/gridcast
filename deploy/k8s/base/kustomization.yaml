@@ -13,6 +13,7 @@ labels:
 
 resources:
   - namespace.yaml
+  - priorityclass.yaml
   - serviceaccounts.yaml
   - api-pvc.yaml
   - api-deployment.yaml

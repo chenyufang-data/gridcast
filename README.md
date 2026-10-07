@@ -249,7 +249,7 @@ model, a CronJob run, a TFT forecast and a tree retrain (both scored), and the U
 three minutes (five with a cold cache). A run with a deliberately wrong model pin failed at
 the rollout and uploaded the cluster's events and logs.
 
-**The GKE trial (72 hours from 2026-10-05).** Three scripts create and remove everything,
+**The GKE trial (2026-10-05 to 2026-10-08).** Three scripts create and remove everything,
 from Git Bash on the laptop:
 
 ```bash
@@ -271,9 +271,22 @@ cluster:
 | Model pin | `/readyz` reports that the served TFT is the pinned version |
 | Requests | Autopilot kept the requests and burst limits as written |
 
-Estimated from list prices, the trial costs about $2.30 in pod requests for 72 hours, with the GKE
-free tier covering the cluster fee (an estimate, not yet a billing report). Still open
-while the trial runs: the scheduled jobs succeeding on two consecutive mornings.
+**What the trial found: the single writer was the eviction victim.** Every scheduled job so
+far succeeded on its first try, but the API was not always up between them. Autopilot
+packs each node to what its pods request. Whenever it removed an underused node, the DNS
+pod that lived there moved to the full node, and the scheduler made room by evicting the
+lowest-priority pod. With every gridcast pod at priority 0, that was the API, the largest
+request, every time: 36 evictions in 46 hours, a median of 38 s until its container ran
+again plus about 20 s of startup, roughly 1 % unavailable. The jobs' retries would have
+covered an eviction during a run, and none failed. A VM never does this, and with several
+API replicas it would not matter; with one writer it does. The fix is a
+[PriorityClass](deploy/k8s/base/priorityclass.yaml) for the API and the seed Job, so a UI
+replica (there are two, with a PodDisruptionBudget) or a finished job pod gives way
+instead. It went live on 2026-10-07, and the trial was extended by a morning to measure it.
+
+Estimated from list prices, the trial costs about $2.30 in pod requests per 72 hours, with
+the GKE free tier covering the cluster fee (an estimate, not yet a billing report). Still
+open while the trial runs: the third morning's jobs and the effect of the fix.
 
 ## License
 
