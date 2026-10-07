@@ -32,6 +32,8 @@ spec:
       serviceAccountName: gridcast-api
       automountServiceAccountToken: false
       enableServiceLinks: false
+      # outranks the UI and the job pods, so a system pod that needs room evicts them first
+      priorityClassName: gridcast-writer
       terminationGracePeriodSeconds: 60
       securityContext:
         runAsNonRoot: true

@@ -20,6 +20,7 @@ import yaml
 K8S = Path(__file__).resolve().parent.parent / "deploy" / "k8s"
 OVERLAYS = ("kind", "gke")
 SEED_OVERLAYS = ("kind-seed", "gke-seed")  # an environment plus components/seed
+CLUSTER_SCOPED = {"Namespace", "PriorityClass"}
 KUBECTL = shutil.which("kubectl")
 
 
@@ -243,7 +244,7 @@ def test_every_object_lives_in_the_gridcast_namespace(overlay: str) -> None:
     outside = [
         (d["kind"], d["metadata"]["name"])
         for d in render(overlay)
-        if d["kind"] != "Namespace" and d["metadata"].get("namespace") != "gridcast"
+        if d["kind"] not in CLUSTER_SCOPED and d["metadata"].get("namespace") != "gridcast"
     ]
     assert outside == []
 
@@ -292,3 +293,15 @@ def test_a_seed_overlay_is_its_environment_plus_the_seed_only(overlay: str) -> N
         if d["kind"] == "CronJob":
             d["spec"].pop("suspend", None)
     assert sorted(seeded, key=_object_id) == sorted(plain, key=_object_id)
+
+
+@pytest.mark.parametrize("overlay", OVERLAYS + SEED_OVERLAYS)
+def test_the_writer_outranks_every_other_gridcast_pod(overlay: str) -> None:
+    # on a full node a system pod evicts the lowest priority first: never the single writer
+    docs = render(overlay)
+    (pc,) = by_kind(docs, "PriorityClass")
+    assert 0 < pc["value"] < 1_000_000_000 and pc["globalDefault"] is False
+    writers = {"gridcast-api", "gridcast-seed"}
+    for name, spec in pod_specs(docs):
+        expected = pc["metadata"]["name"] if name in writers else None
+        assert spec.get("priorityClassName") == expected, name

@@ -1,0 +1,14 @@
+# The single SQLite writer outranks the other gridcast pods. When a system pod needs room on
+# a full node (GKE Autopilot moves kube-dns whenever it scales a node down), the scheduler
+# evicts the lowest-priority pods first: without this class every gridcast pod is priority 0
+# and the API, the largest request on the node, was the victim 36 times in 46 hours of the
+# GKE trial (about a minute down each time). With it, a UI replica (two of them, with a
+# PodDisruptionBudget) or a finished job pod gives way instead. Far below the system classes
+# (2,000,000,000), so it never competes with the platform itself.
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: gridcast-writer
+value: 1000
+globalDefault: false
+description: The gridcast API and its seed Job, the only writers of the SQLite store.

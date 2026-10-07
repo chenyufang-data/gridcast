@@ -45,6 +45,7 @@ The decisions that shape it:
 - **Probes.** `/livez` only shows that the process answers. `/readyz` checks a read-only database connection and, when `REQUIRE_TFT=1`, that the loaded model is the pinned `TFT_EXPECTED_VERSION`.
 - **Measured resources.** API 250m CPU and 1 GiB memory; UI 100m and 512 MiB.
 - **Hardened pods.** Non-root (uid 10001), read-only root filesystem, no service-account token mounted.
+- **The writer outranks the rest.** The API and the seed Job use the PriorityClass `gridcast-writer` (`base/priorityclass.yaml`). On a full node a system pod evicts the lowest priority first; on the GKE trial, before this class, that was the API, 36 times in 46 hours.
 - **No secrets in git.** The admin token lives in the Secret `gridcast-admin`, created by hand.
 
 ## Run it on kind

@@ -27,6 +27,7 @@ spec:
       serviceAccountName: gridcast-api
       automountServiceAccountToken: false
       enableServiceLinks: false
+      priorityClassName: gridcast-writer  # the writer while it runs, like the API
       restartPolicy: Never
       securityContext:
         runAsNonRoot: true
