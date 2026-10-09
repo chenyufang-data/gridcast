@@ -1,6 +1,7 @@
 # GKE Autopilot: the optional 72-hour trial in the separate project nyiso-gridcast-k8s.
 # Images come from Artifact Registry and are pinned by digest; deploy/k8s/gke/push.sh
-# writes the digests below (first push 2026-10-05, images built from fd63a04).
+# writes the digests below (first push 2026-10-05, images built from fd63a04; the registry
+# was deleted at teardown on 2026-10-09, so up.sh pushes again before the next deploy).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
