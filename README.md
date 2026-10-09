@@ -249,8 +249,8 @@ model, a CronJob run, a TFT forecast and a tree retrain (both scored), and the U
 three minutes (five with a cold cache). A run with a deliberately wrong model pin failed at
 the rollout and uploaded the cluster's events and logs.
 
-**The GKE trial (2026-10-05 to 2026-10-08).** Three scripts create and remove everything,
-from Git Bash on the laptop:
+**The GKE trial (2026-10-05 to 2026-10-09, 92 hours, now torn down).** Three scripts create and
+remove everything, from Git Bash on the laptop:
 
 ```bash
 BILLING=<billing account id> deploy/k8s/gke/up.sh   # project, budget alert, registry, images by digest, cluster, deploy
@@ -271,22 +271,38 @@ cluster:
 | Model pin | `/readyz` reports that the served TFT is the pinned version |
 | Requests | Autopilot kept the requests and burst limits as written |
 
-**What the trial found: the single writer was the eviction victim.** Every scheduled job so
-far succeeded on its first try, but the API was not always up between them. Autopilot
-packs each node to what its pods request. Whenever it removed an underused node, the DNS
-pod that lived there moved to the full node, and the scheduler made room by evicting the
-lowest-priority pod. With every gridcast pod at priority 0, that was the API, the largest
-request, every time: 36 evictions in 46 hours, a median of 38 s until its container ran
-again plus about 20 s of startup, roughly 1 % unavailable. The jobs' retries would have
-covered an eviction during a run, and none failed. A VM never does this, and with several
-API replicas it would not matter; with one writer it does. The fix is a
-[PriorityClass](deploy/k8s/base/priorityclass.yaml) for the API and the seed Job, so a UI
-replica (there are two, with a PodDisruptionBudget) or a finished job pod gives way
-instead. It went live on 2026-10-07, and the trial was extended by a morning to measure it.
+**Scheduled jobs.** All eleven scheduled runs succeeded on their first try, each in 10 to
+36 seconds: the 06:30 and 08:30 ET jobs on the first day, and all three jobs on each of the
+next three mornings.
 
-Estimated from list prices, the trial costs about $2.30 in pod requests per 72 hours, with
-the GKE free tier covering the cluster fee (an estimate, not yet a billing report). Still
-open while the trial runs: the third morning's jobs and the effect of the fix.
+**What the trial found: the single writer was the eviction victim.** Autopilot packs each
+node to what its pods request. Whenever it removed an underused node, the DNS pod that lived
+there moved to the full node, and the scheduler made room by evicting the lowest-priority
+pod. With every gridcast pod at priority 0, that was the API, the largest request, every
+time: 36 evictions in 46 hours, each a median of 38 s until its container ran again plus
+about 20 s of startup, roughly 1 % unavailable. No job happened to run during one, and the
+jobs' retries would have covered it. A VM never does this, and with several API replicas it
+would not matter; with one writer it does. The fix is a
+[PriorityClass](deploy/k8s/base/priorityclass.yaml) for the API and the seed Job, so a UI
+replica (there are two, with a PodDisruptionBudget) or a finished job pod gives way instead.
+In the 45 hours after it went live, the API was evicted once instead of 36 times; UI pods
+were evicted 11 times, with the other UI pod serving each time. The remaining eviction came
+when both UI pods sat on the API's node and the DNS pod needed more CPU than the two of them
+free (270m against 200m); keeping some spare room on the node would close that gap.
+
+**Cost.** The billing report shows $14.12 of usage, before credits, for the 92 hours, all of
+it paid by credits:
+
+| Service | Usage cost | What it is |
+|---|---|---|
+| Kubernetes Engine | $10.32 | the cluster fee ($0.10 an hour, offset by the GKE free tier) and the pod requests |
+| Cloud Monitoring | $2.27 | most likely the Managed Prometheus metrics Autopilot collects by default |
+| Networking | $1.42 | most likely the nodes' external IPv4 addresses |
+| Compute Engine | $0.11 | the 10 GiB disk |
+| Vertex AI | $0.00 | the chat's Gemini calls |
+
+My estimate beforehand covered only the pod requests ($2.30 per 72 hours) and missed
+monitoring and networking, which together cost more than the pods did.
 
 ## License
 
